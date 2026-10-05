@@ -1,0 +1,33 @@
+{
+  "name": "acp-extension-omp",
+  "version": "0.1.0",
+  "description": "ACP adapter for a user-installed Oh My Pi RPC runtime",
+  "type": "module",
+  "license": "Apache-2.0",
+  "bin": {
+    "acp-extension-omp": "dist/index.js"
+  },
+  "files": ["dist", "README.md", "LICENSE", "COMPATIBILITY.md", "TESTING.md", "RELEASE.md", "MIGRATION.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run test",
+    "smoke": "node scripts/smoke.mjs",
+    "contract": "node scripts/contract.mjs",
+    "pack": "npm pack"
+  },
+  "engines": {
+    "node": ">=22.14.0 <23 || >=23.6.0"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.3.0",
+    "acp-extension-core": "0.1.8",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
