@@ -16,6 +16,10 @@ review, reproducible runtime archive, public checksum read-back, and Lody
 end-to-end acceptance must pass. These gates are recorded in `TESTING.md` and
 `RELEASE.md`; optional load/resume/usage advertisements remain disabled.
 
+改这个仓库的 agent 先读 `AGENTS.md`。能力与发布边界仍以 `README.md`、
+`COMPATIBILITY.md`、`TESTING.md`、`RELEASE.md`、`MIGRATION.md` 为准；
+`docs-ai/` 不是能力合同。
+
 For collaborators:
 
 ```sh
