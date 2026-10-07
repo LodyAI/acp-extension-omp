@@ -31,7 +31,7 @@
 
 `npm run build` 只编译。
 
-`npm pack --dry-run` 证明 `files` 白名单。不要把 `docs-ai/` 或 `.omp/skills/` 加进白名单。
+`npm pack --dry-run` 证明 `files` 白名单。不要把 `docs-ai/`、`.omp/skills/` 或 `.claude/skills/` 加进白名单。
 
 `npm run smoke` 仅当 `omp --version` 的 stdout 以 `omp/` 开头时才跑。它覆盖 initialize、new、load，不发 prompt。通过不等于生产支持，也不授权宣告 load、resume 或 usage。
 
@@ -47,13 +47,13 @@ CI 变绿不是矩阵通过。CI 只跑 check、build 和 `npm pack --dry-run`�
 
 「计划中」只是草稿。起草者不能把自己的计划标成「已核对」。人或另一个 agent 核对过目标、非目标、备选、难以回头的改动和验收证据，并明确允许实现之后，状态才能改为「已核对」。在那之前不要改 `src/`。
 
-评审、调查、测试输出、纯措辞、只改测试，都不建条目。拿不准就不写。
+评审、调查、测试输出、纯措辞、只改测试，都不建条目。拿不准就不写。人明确要求为一次不合格工作建档时，可以建，但仍不能放软上面的边界。
 
 行为变了，只改回答那个问题的根文档。
 
 上面的边界留在本文件。条目的非目标只写该条目自己的排除项。不要把这份边界清单机械抄进每一份计划。
 
-编号、生命周期和唯一模板在 `docs-ai/README.md`。`.omp/skills/write-ai-doc/SKILL.md` 只是触发器，不另放一套模板。
+编号、生命周期和唯一模板在 `docs-ai/README.md`。`.omp/skills/write-ai-doc/SKILL.md` 和 `.claude/skills/write-ai-doc/SKILL.md` 是同一份触发器，不另放一套模板。
 
 ## 审核
 
@@ -63,7 +63,7 @@ CI 变绿不是矩阵通过。CI 只跑 check、build 和 `npm pack --dry-run`�
 
 实现之后，`001-action.md` 记录相对计划的偏差，以及尚未验证的问题。
 
-agent 互审时，优先用和实现者不同的模型。实现者处理发现。审核者默认只审查，不编辑、不提交、不推送、不改 PR，除非被明确委托去做其中一件。
+agent 互审必须由非实现者的独立 reviewer 做。优先用和实现者不同的模型，但这不是必须。实现者处理发现。审核者默认只审查，不编辑、不提交、不推送、不改 PR，除非被明确委托去做其中一件。
 
 每条问题要有稳定编号、严重程度、文件位置、触发条件、预期行为、实际行为，以及怎么验证。每一轮都列出已检查和未检查的范围。检查不完整不能给 `clean`。区分观察到的事实和推断。
 
