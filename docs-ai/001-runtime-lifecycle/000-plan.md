@@ -66,3 +66,5 @@
 
 - 更新于 2026-10-09：第二轮修复强杀退出竞态，并以 21 项取代原 19 项数量验收 — 见 [003-review2-fixes.md](003-review2-fixes.md)
 - 更新于 2026-10-09：prepack 改为直接调用本地 TypeScript 编译器 — 见 [004-prepack-compiler.md](004-prepack-compiler.md)
+- 更新于 2026-10-08：第一轮 review 修复与补充证据（补登此行） — 见 [002-review-fixes.md](002-review-fixes.md)
+- 更新于 2026-10-09：Windows CI 结果、eof 用例在 Windows 跳过，以及独立审核的处理 — 见 [005-windows-ci-review.md](005-windows-ci-review.md)

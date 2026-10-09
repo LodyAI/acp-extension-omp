@@ -14,11 +14,14 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const tempDirectories: string[] = [];
 
-function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+// Forced close waits two real 1s grace periods (SIGTERM, then SIGKILL); leave slow-runner headroom.
+const FORCED_CLOSE_TIMEOUT_MS = 6_000;
+
+function withTimeout<T>(promise: Promise<T>, label: string, ms = 3_000): Promise<T> {
   // Integration boundary: protect against a real ACP/child-process deadlock.
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out`)), 3_000);
+    timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
@@ -194,7 +197,8 @@ describe("OMP ACP server lifecycle", () => {
     const directory = await fakeOmp(mode);
     const previousPath = process.env.PATH;
     const previousExitCode = process.exitCode;
-    process.env.PATH = [directory, dirname(process.execPath)].join(delimiter);
+    // Keep "missing" free of any directory that could hold a real omp.
+    process.env.PATH = mode === "missing" ? directory : [directory, dirname(process.execPath)].join(delimiter);
     const client = harness(mode === "missing" || process.platform !== "win32" ? undefined : syntheticSpawn(directory));
     try {
       await client.request<{ agentInfo: { name: string } }>("initialize", {
@@ -234,7 +238,7 @@ describe("OMP ACP server lifecycle", () => {
       const child = ownedChild;
       if (!child) throw new Error("serve did not spawn its OMP child");
       expect(fixturePid).toBe(child.pid);
-      await withTimeout(client.close(), "ACP server close");
+      await withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS);
       expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
       expect(processExists(fixturePid)).toBe(false);
     } finally {
@@ -256,7 +260,7 @@ describe("OMP ACP server lifecycle", () => {
         }
       }
     }
-  });
+  }, 3 * FORCED_CLOSE_TIMEOUT_MS);
   it.each(["false", "async-error"] as const)("handles forced-kill failure races (%s)", async (failureMode) => {
     const previousExitCode = process.exitCode;
 
@@ -335,12 +339,12 @@ describe("OMP ACP server lifecycle", () => {
         await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
         await client.request("session/new", { cwd: tmpdir(), mcpServers: [] });
         if (exitAfterForce) {
-          await withTimeout(client.close(), "ACP server close");
+          await withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS);
           expect(child.exitCode).toBe(0);
           expect(process.exitCode).toBe(previousExitCode);
           expect(failures).toEqual([]);
         } else {
-          await expect(withTimeout(client.close(), "ACP server close")).rejects.toThrow(/terminat|kill/i);
+          await expect(withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS)).rejects.toThrow(/terminat|kill/i);
           expect(process.exitCode).toBe(1);
           expect(failures).toHaveLength(1);
           expect(failures[0]?.message).toMatch(/terminat|kill/i);
@@ -357,7 +361,7 @@ describe("OMP ACP server lifecycle", () => {
 
     await runScenario(false);
     await runScenario(true);
-  });
+  }, 3 * FORCED_CLOSE_TIMEOUT_MS);
   it.each(["SIGTERM", "SIGINT", "SIGHUP"] as const)("reaps OMP before re-raising %s", async (signal) => {
     const directory = await fakeOmp("serve");
     const previousPath = process.env.PATH;

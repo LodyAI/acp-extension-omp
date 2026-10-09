@@ -51,3 +51,4 @@
 ## 修订记录
 
 - 更新于 2026-10-09：重发失败时按信号编号退出，首个信号后停止拦截全部信号 — 见 [002-signal-fallback.md](002-signal-fallback.md)
+- 更新于 2026-10-09：独立审核结果与信号相关发现的处理 — 见 [003-independent-review.md](003-independent-review.md)

@@ -10,7 +10,8 @@ This is a runnable collaboration branch, not a published Lody provider or an
 OMP compatibility release. Local verification covers OMP 18.3.1 on macOS arm64
 with Node 22.22.3 and a real OMP contract run against a loopback-only synthetic
 model. The 27 synthetic regression tests in `npm run check` do not use OMP and
-are not tied to that evidence row. No production runtime manifest is changed.
+are not tied to that evidence row; one stdout-EOF case runs only on POSIX and is
+skipped on Windows. No production runtime manifest is changed.
 
 Before release, the 18.2.8/stable-version and OS matrices, independent maintainer
 review, reproducible runtime archive, public checksum read-back, and Lody
