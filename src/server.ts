@@ -131,7 +131,14 @@ export function serve(stream: Stream, options: ServeOptions) {
       const exited = await waitForExit(owned);
       owned.removeListener("error", recordKillError);
       if (!exited || !hasExited(owned)) {
-        throw new Error("OMP child process did not exit after force termination", { cause: killError });
+        // Release the unkillable child so its handle and pipes no longer keep the adapter alive.
+        owned.unref();
+        owned.stdin?.destroy();
+        owned.stdout?.destroy();
+        owned.stderr?.destroy();
+        const stuck = new Error("OMP child process did not exit after force termination", { cause: killError });
+        process.stderr.write(`acp-extension-omp: ${stuck.message} (pid ${owned.pid})\n`);
+        throw stuck;
       }
     })().catch((error: unknown) => {
       const failure = error instanceof Error ? error : new Error(String(error));

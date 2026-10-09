@@ -21,11 +21,17 @@ function processExists(pid: number): boolean {
   }
 }
 
-async function syntheticOmp(): Promise<string> {
+async function syntheticOmp(unkillable = false): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "acp-extension-omp-signal-"));
   const executable = join(directory, "omp");
+  // "Unkillable" ignores SIGTERM and stdin EOF; SIGKILL is dropped in the adapter by DROP_GROUP_SIGKILL.
+  const holdOpen = unkillable
+    ? `process.on("SIGTERM", () => {});
+require("node:net").createServer().listen(0, "127.0.0.1");
+`
+    : "";
   await writeFile(executable, `#!/usr/bin/env node
-require("node:fs").writeFileSync(require("node:path").join(__dirname, "child.pid"), String(process.pid));
+${holdOpen}require("node:fs").writeFileSync(require("node:path").join(__dirname, "child.pid"), String(process.pid));
 if (process.argv.slice(2).join(" ") !== "--mode rpc") process.exit(42);
 require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
   const command = JSON.parse(line);
@@ -39,12 +45,20 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
   return directory;
 }
 
-function startAdapter(entry: string, ompDirectory: string) {
-  const child = spawn(process.execPath, [entry], {
+// Preloaded into the adapter to simulate an OMP process group that survives SIGKILL.
+const DROP_GROUP_SIGKILL = `data:text/javascript,${encodeURIComponent(
+  "const kill = process.kill.bind(process); process.kill = (pid, signal) => (signal === 'SIGKILL' && pid < 0 ? true : kill(pid, signal));"
+)}`;
+
+function startAdapter(entry: string, ompDirectory: string, nodeArgs: string[] = []) {
+  const child = spawn(process.execPath, [...nodeArgs, entry], {
     env: { ...process.env, PATH: [ompDirectory, dirname(process.execPath), process.env.PATH ?? ""].join(delimiter) },
     stdio: ["pipe", "pipe", "pipe"],
   });
-  child.stderr.resume();
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
   const exited = once(child, "exit") as Promise<[number | null, NodeJS.Signals | null]>;
   const pending = new Map<number, (message: { result?: unknown; error?: unknown }) => void>();
   let nextId = 0;
@@ -58,7 +72,7 @@ function startAdapter(entry: string, ompDirectory: string) {
       pending.set(id, done);
       child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     });
-  return { child, exited, request };
+  return { child, exited, request, stderr: () => stderr };
 }
 
 // Exercises the built entry end to end: index.ts wiring, the real process, and Node's default signal exit.
@@ -104,6 +118,29 @@ describe.skipIf(process.platform === "win32")("adapter process shutdown signals"
       const [code, exitSignal] = await adapter.exited;
       expect({ code, signal: exitSignal }).toEqual({ code: null, signal });
       expect(processExists(ompPid)).toBe(false);
+    } finally {
+      if (ompPid !== undefined && processExists(ompPid)) process.kill(ompPid, "SIGKILL");
+    }
+  }, 15_000);
+
+  it("exits with code 1 when OMP survives force termination", async () => {
+    const ompDirectory = await syntheticOmp(true);
+    cleanup.push(ompDirectory);
+    const adapter = startAdapter(join(buildDirectory, "index.js"), ompDirectory, ["--import", DROP_GROUP_SIGKILL]);
+    adapters.push(adapter.child);
+    let ompPid: number | undefined;
+    try {
+      await adapter.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const session = await adapter.request("session/new", { cwd: ompDirectory, mcpServers: [] });
+      expect(session.error).toBeUndefined();
+      ompPid = Number(await readFile(join(ompDirectory, "child.pid"), "utf8"));
+
+      adapter.child.stdin.end();
+      const [code, exitSignal] = await adapter.exited;
+      expect({ code, signal: exitSignal }).toEqual({ code: 1, signal: null });
+      expect(adapter.stderr()).toMatch(/did not exit after force termination/);
+      // The adapter released the child it could not terminate; it is left running, not reaped.
+      expect(processExists(ompPid)).toBe(true);
     } finally {
       if (ompPid !== undefined && processExists(ompPid)) process.kill(ompPid, "SIGKILL");
     }

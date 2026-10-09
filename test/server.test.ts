@@ -273,6 +273,7 @@ describe("OMP ACP server lifecycle", () => {
         stderr: new PassThrough(),
         exitCode: null as number | null,
         signalCode: null as NodeJS.Signals | null,
+        unref: vi.fn(),
         kill(signal: NodeJS.Signals) {
           killCalls.push(signal);
           if (signal === "SIGKILL") {
@@ -288,7 +289,7 @@ describe("OMP ACP server lifecycle", () => {
           }
           return false;
         },
-      }) as unknown as ChildProcess & { killCalls: NodeJS.Signals[] };
+      }) as unknown as ChildProcess & { killCalls: NodeJS.Signals[]; unref: ReturnType<typeof vi.fn> };
       child.killCalls = killCalls;
 
       function exitChild(): void {
@@ -331,6 +332,7 @@ describe("OMP ACP server lifecycle", () => {
             return true;
           }) as typeof process.kill);
       const failures: Error[] = [];
+      const diagnostics: string[] = [];
       const client = harness(
         () => child,
         (error) => failures.push(error)
@@ -338,16 +340,35 @@ describe("OMP ACP server lifecycle", () => {
       try {
         await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
         await client.request("session/new", { cwd: tmpdir(), mcpServers: [] });
+        const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
+          diagnostics.push(String(chunk));
+          return true;
+        }) as typeof process.stderr.write);
+        try {
+          if (exitAfterForce) {
+            await withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS);
+          } else {
+            await expect(withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS)).rejects.toThrow(/terminat|kill/i);
+          }
+        } finally {
+          stderrSpy.mockRestore();
+        }
         if (exitAfterForce) {
-          await withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS);
           expect(child.exitCode).toBe(0);
           expect(process.exitCode).toBe(previousExitCode);
           expect(failures).toEqual([]);
+          expect(child.unref).not.toHaveBeenCalled();
+          // stdin is ended by the normal RPC close; only the failure branch tears down the read side.
+          expect([child.stdout.destroyed, child.stderr.destroyed]).toEqual([false, false]);
+          expect(diagnostics).toEqual([]);
         } else {
-          await expect(withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS)).rejects.toThrow(/terminat|kill/i);
           expect(process.exitCode).toBe(1);
           expect(failures).toHaveLength(1);
           expect(failures[0]?.message).toMatch(/terminat|kill/i);
+          // The adapter must not stay alive on a child it could not terminate.
+          expect(child.unref).toHaveBeenCalledOnce();
+          expect([child.stdin.destroyed, child.stdout.destroyed, child.stderr.destroyed]).toEqual([true, true, true]);
+          expect(diagnostics.join("")).toMatch(/did not exit after force termination/);
         }
         if (process.platform === "win32") expect(killCalls).toEqual(["SIGKILL"]);
       } finally {

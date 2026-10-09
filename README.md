@@ -9,9 +9,9 @@ does not bundle OMP, inspect credentials, or persist user session data.
 This is a runnable collaboration branch, not a published Lody provider or an
 OMP compatibility release. Local verification covers OMP 18.3.1 on macOS arm64
 with Node 22.22.3 and a real OMP contract run against a loopback-only synthetic
-model. The 30 synthetic regression tests in `npm run check` do not use OMP and
-are not tied to that evidence row; one stdout-EOF case and three adapter-process
-signal cases run only on POSIX and are skipped on Windows. No production
+model. The 31 synthetic regression tests in `npm run check` do not use OMP and
+are not tied to that evidence row; one stdout-EOF case and four adapter-process
+cases run only on POSIX and are skipped on Windows. No production
 runtime manifest is changed.
 
 Before release, the 18.2.8/stable-version and OS matrices, independent maintainer
@@ -62,7 +62,9 @@ fail the ACP connection rather than synthesizing a successful prompt result.
 
 Closing the ACP connection sends SIGTERM to the OMP process group on POSIX, or
 ends OMP stdin on Windows. After a one-second grace period the adapter
-force-terminates the owned child, and close fails if it still has not exited.
+force-terminates the owned child. If it still has not exited, close fails: the
+adapter writes the reason to stderr, releases that child without reaping it, and
+exits with code 1 instead of waiting on it.
 On POSIX, SIGTERM, SIGINT, or SIGHUP sent to the adapter first runs the same
 close, then the adapter exits by that signal. SIGKILL cannot be intercepted.
 
@@ -85,7 +87,8 @@ notification ordering. Lifecycle tests await the actual SDK connection closure
 after spawn failure, unexpected exit, EOF, and malformed RPC output. They also
 force-terminate a synthetic child that ignores EOF and SIGTERM, and reap OMP
 before re-raising a shutdown signal. On POSIX, a freshly compiled adapter process
-is also signalled directly and must exit by that signal with OMP reaped.
+is also signalled directly and must exit by that signal with OMP reaped, and must
+exit with code 1 when OMP survives force termination.
 
 `npm run smoke` covers initialize/new/load without sending a prompt.
 `npm run contract` drives real OMP through a loopback-only synthetic model, in a
