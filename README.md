@@ -9,9 +9,10 @@ does not bundle OMP, inspect credentials, or persist user session data.
 This is a runnable collaboration branch, not a published Lody provider or an
 OMP compatibility release. Local verification covers OMP 18.3.1 on macOS arm64
 with Node 22.22.3 and a real OMP contract run against a loopback-only synthetic
-model. The 27 synthetic regression tests in `npm run check` do not use OMP and
-are not tied to that evidence row; one stdout-EOF case runs only on POSIX and is
-skipped on Windows. No production runtime manifest is changed.
+model. The 30 synthetic regression tests in `npm run check` do not use OMP and
+are not tied to that evidence row; one stdout-EOF case and three adapter-process
+signal cases run only on POSIX and are skipped on Windows. No production
+runtime manifest is changed.
 
 Before release, the 18.2.8/stable-version and OS matrices, independent maintainer
 review, reproducible runtime archive, public checksum read-back, and Lody
@@ -83,7 +84,8 @@ session admission, native settlement, usage deduplication, cancellation, and
 notification ordering. Lifecycle tests await the actual SDK connection closure
 after spawn failure, unexpected exit, EOF, and malformed RPC output. They also
 force-terminate a synthetic child that ignores EOF and SIGTERM, and reap OMP
-before re-raising a shutdown signal.
+before re-raising a shutdown signal. On POSIX, a freshly compiled adapter process
+is also signalled directly and must exit by that signal with OMP reaped.
 
 `npm run smoke` covers initialize/new/load without sending a prompt.
 `npm run contract` drives real OMP through a loopback-only synthetic model, in a

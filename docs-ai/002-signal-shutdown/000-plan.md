@@ -52,3 +52,4 @@
 
 - 更新于 2026-10-09：重发失败时按信号编号退出，首个信号后停止拦截全部信号 — 见 [002-signal-fallback.md](002-signal-fallback.md)
 - 更新于 2026-10-09：独立审核结果与信号相关发现的处理 — 见 [003-independent-review.md](003-independent-review.md)
+- 更新于 2026-10-09：补上适配器进程级的真实信号测试，关闭 SIG-005 — 见 [004-process-signal-test.md](004-process-signal-test.md)
