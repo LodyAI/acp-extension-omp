@@ -50,9 +50,39 @@ headers, cookies, model prompts, or raw provider responses.
 - Unit tests cover delayed native settlement and competing session/prompt
   requests; those boundaries are not claimed as real background-work evidence.
 
+### Matrix record: OMP 18.8.4 (2026-10-09)
+
+Local evidence, not a release declaration.
+
+| Field | Value |
+| --- | --- |
+| OMP | 18.8.4, Homebrew `can1357/tap`, darwin-arm64 executable |
+| OMP digest | SHA-256 `9d6f8b5be9d6b46562ee560a2fd90bc5b1f364da66adfc0f89ada82ee1367675`, 212453664 bytes |
+| Node | 26.10.0 and 22.15.0 |
+| OS | macOS (Darwin 27.0.0) arm64 |
+| Adapter commit | `39d745a40de08edc7baf5d15b3048b7ecd3e2971` |
+| Core | `acp-extension-core` 0.1.8 |
+| Test profile | `contract` (smoke: per-run `lody-smoke-<pid>`), temporary HOME, loopback-only model |
+| Entry under test | npm archive packed from a clean `git archive` export, installed with production dependencies only into an independent temporary directory |
+| Result | Pass on both Node versions: `npm run smoke` and `npm run contract` |
+
+- Required cases 1–8 ran against the real executable. Case 1 now compares the
+  full `initialize` result with the reviewed capability set; a build that also
+  advertised `loadSession` failed the runner.
+- Case 9 (child failure) is covered by synthetic tests on Linux, macOS and
+  Windows CI, not by this real-executable row.
+- Two clean builds with Node 26.10.0 / npm 11.19.1 produced the same archive:
+  18120 bytes, SHA-256
+  `c7729e02a0394091b92b25c10d750783a01dac0f1dca014e743a759319c5f8a1`, 15 entries.
+  Node 22.15.0 / npm 10.9.2 produced identical file contents and an identical
+  uncompressed tar, but different gzip bytes (18111 bytes), so the release
+  toolchain must be recorded with the digest.
+
 ## Remaining gates
 
-OMP 18.2.8 and the stable-version matrix remain unverified. Official release/npm
+OMP 18.2.8 and the stable-version matrix remain unverified. As of 2026-10-09 the
+latest stable OMP release is 18.8.6 and the previous stable is 18.8.5; neither is
+installed here, and agents must not download OMP. 18.8.4 above is neither row. Official release/npm
 sources were found, but direct asset TLS failed, authenticated asset download
 timed out with an incomplete digest, and isolated npm installation timed out.
 The incomplete executable was not run. Required next evidence includes that

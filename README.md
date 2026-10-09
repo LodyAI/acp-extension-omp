@@ -7,9 +7,9 @@ does not bundle OMP, inspect credentials, or persist user session data.
 ## Collaboration status
 
 This is a runnable collaboration branch, not a published Lody provider or an
-OMP compatibility release. Local verification covers OMP 18.3.1 on macOS arm64
-with Node 22.22.3 and a real OMP contract run against a loopback-only synthetic
-model. The 36 synthetic regression tests in `npm run check` do not use OMP and
+OMP compatibility release. Local verification covers OMP 18.3.1 (Node 22.22.3)
+and OMP 18.8.4 (Node 26.10.0 and 22.15.0) on macOS arm64, with real OMP contract
+runs against a loopback-only synthetic model. The 36 synthetic regression tests in `npm run check` do not use OMP and
 are not tied to that evidence row; one stdout-EOF case and seven adapter-process
 cases run only on POSIX and are skipped on Windows. No production
 runtime manifest is changed.
@@ -112,7 +112,7 @@ also accepts an explicit OMP executable:
 npm run contract -- /path/to/installed/dist/index.js /path/to/verified/omp
 ```
 
-Local evidence currently covers OMP 18.3.1, Node 22.22.3, macOS arm64, including
+Local evidence currently covers OMP 18.3.1 and 18.8.4 on macOS arm64, including
 an independently installed npm tarball. It does not establish the 18.2.8 baseline,
 all supported operating systems, automatic compaction, arbitrary extensions, or
 real-provider quality. See `TESTING.md` for remaining gates.

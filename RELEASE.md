@@ -19,7 +19,9 @@ publish artifacts or update Lody's manifest from an unreviewed branch.
 
 ## Artifact acceptance
 
-1. Build the adapter reproducibly from a tagged source revision.
+1. Build the adapter reproducibly from a tagged source revision, and record the
+   Node and npm versions used: the archive's gzip bytes differ between
+   toolchains even when its contents are identical.
 2. Record the generated archive's exact byte size and SHA-256.
 3. Publish only through the maintainer-approved immutable artifact channel.
 4. Fetch the public artifact again and read back its actual bytes, size, and
