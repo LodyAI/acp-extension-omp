@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 // Real OMP, synthetic model only: no user profile, credentials, or external endpoint.
 const entry = resolve(process.argv[2] ?? "dist/index.js");
@@ -108,7 +108,7 @@ try {
     const bin = join(scratch, "bin");
     await mkdir(bin);
     await symlink(resolve(executable), join(bin, "omp"));
-    env.PATH = `${bin}:${dirname(process.execPath)}:${env.PATH}`;
+    env.PATH = [bin, dirname(process.execPath), env.PATH].join(delimiter);
   }
   endpoint.listen(0, "127.0.0.1");
   await once(endpoint, "listening");
@@ -156,10 +156,14 @@ try {
   const invalid = join(home, "invalid.jsonl");
   await writeFile(invalid, "not-a-native-session\n");
   await assert.rejects(resumed.request("session/load", { ...sessionParams, sessionId: invalid }));
-  console.log(`${version.stdout.trim()}: real ACP prompt/cancel/exact load/resume/usage/restart/order/error contracts passed with loopback-only model.`);
 } finally {
   for (const client of clients) await client.close();
   endpoint.closeAllConnections();
   await new Promise((done) => endpoint.close(done));
   await rm(scratch, { recursive: true, force: true });
 }
+for (const { child } of clients) {
+  assert.equal(child.signalCode, null, "ACP adapter must not exit by signal");
+  assert.equal(child.exitCode, 0, "ACP adapter must exit with code 0");
+}
+console.log(`${version.stdout.trim()}: real ACP prompt/cancel/exact load/resume/usage/restart/order/error contracts passed with loopback-only model.`);

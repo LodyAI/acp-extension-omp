@@ -7,9 +7,10 @@ does not bundle OMP, inspect credentials, or persist user session data.
 ## Collaboration status
 
 This is a runnable collaboration branch, not a published Lody provider or an
-OMP compatibility release. Local verification covers OMP 18.3.1 on macOS arm64,
-Node 22.22.3, 18 regression tests, and a real OMP contract run against a
-loopback-only synthetic model. No production runtime manifest is changed.
+OMP compatibility release. Local verification covers OMP 18.3.1 on macOS arm64
+with Node 22.22.3 and a real OMP contract run against a loopback-only synthetic
+model. The 27 synthetic regression tests in `npm run check` do not use OMP and
+are not tied to that evidence row. No production runtime manifest is changed.
 
 Before release, the 18.2.8/stable-version and OS matrices, independent maintainer
 review, reproducible runtime archive, public checksum read-back, and Lody
@@ -23,7 +24,7 @@ end-to-end acceptance must pass. These gates are recorded in `TESTING.md` and
 For collaborators:
 
 ```sh
-git clone --branch feat/initial-omp-adapter https://github.com/LodyAI/acp-extension-omp.git
+git clone --branch main https://github.com/LodyAI/acp-extension-omp.git
 cd acp-extension-omp
 npm ci --ignore-scripts
 npm run check
@@ -57,6 +58,12 @@ The adapter launches only `omp --mode rpc`. OMP diagnostics go to stderr; ACP
 and OMP RPC traffic remain separate. Transport failure and child-process exit
 fail the ACP connection rather than synthesizing a successful prompt result.
 
+Closing the ACP connection sends SIGTERM to the OMP process group on POSIX, or
+ends OMP stdin on Windows. After a one-second grace period the adapter
+force-terminates the owned child, and close fails if it still has not exited.
+On POSIX, SIGTERM, SIGINT, or SIGHUP sent to the adapter first runs the same
+close, then the adapter exits by that signal. SIGKILL cannot be intercepted.
+
 ## Validation
 
 Run the locked dependency graph in a clean checkout:
@@ -73,7 +80,9 @@ npm pack --dry-run
 Synthetic regressions cover native session identity, missing files, active
 session admission, native settlement, usage deduplication, cancellation, and
 notification ordering. Lifecycle tests await the actual SDK connection closure
-after spawn failure, unexpected exit, EOF, and malformed RPC output.
+after spawn failure, unexpected exit, EOF, and malformed RPC output. They also
+force-terminate a synthetic child that ignores EOF and SIGTERM, and reap OMP
+before re-raising a shutdown signal.
 
 `npm run smoke` covers initialize/new/load without sending a prompt.
 `npm run contract` drives real OMP through a loopback-only synthetic model, in a

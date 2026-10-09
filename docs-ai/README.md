@@ -6,7 +6,7 @@
 
 能力与发布边界留在 `README.md`、`COMPATIBILITY.md`、`TESTING.md`、`RELEASE.md`、`MIGRATION.md`。常驻适配器边界留在 `AGENTS.md`。不要把那些边界抄进每一个条目。
 
-本 README 不计入编号。当前尚无编号条目。不要回填已有实现。
+本 README 不计入编号。已有编号条目及状态见文末索引。不要回填已有实现。
 
 下面的模板是唯一一份。`.omp/skills/write-ai-doc/SKILL.md` 是指向这里的触发器。不要在 skill 里再放一套模板，也不要把 skill 复制到别的 agent 技能目录。
 
@@ -171,4 +171,5 @@
 
 ## 索引
 
-尚无条目。不要回填。本 README 不计入编号。
+- [001 — 运行时生命周期与可复现检查](001-runtime-lifecycle/000-plan.md) — 2026-10-08：运行时生命周期与可复现检查
+- [002 — 终止信号时回收 OMP 子进程](002-signal-shutdown/000-plan.md) — 2026-10-09：终止信号时回收 OMP 子进程

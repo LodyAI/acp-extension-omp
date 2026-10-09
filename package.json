@@ -15,7 +15,8 @@
     "check": "npm run typecheck && npm run test",
     "smoke": "node scripts/smoke.mjs",
     "contract": "node scripts/contract.mjs",
-    "pack": "npm pack"
+    "pack": "npm pack",
+    "prepack": "node scripts/prepack.mjs"
   },
   "engines": {
     "node": ">=22.14.0 <23 || >=23.6.0"

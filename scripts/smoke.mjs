@@ -62,6 +62,7 @@ const child = spawn(process.execPath, [entry], {
   stdio: ["pipe", "pipe", "pipe"],
   windowsHide: true,
 });
+let adapterExit;
 let stderr = "";
 child.stderr.on("data", (chunk) => {
   stderr += chunk.toString();
@@ -80,6 +81,7 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   }
 });
 child.on("exit", (code, signal) => {
+  adapterExit = { code, signal };
   for (const response of pending.values()) {
     response.reject(new Error(`OMP adapter exited (${code ?? signal}): ${stderr}`));
   }
@@ -130,9 +132,6 @@ try {
       mcpServers: [],
     })
   );
-  process.stdout.write(
-    `OMP ${version.stdout.trim()}: ACP initialize/new/load passed in an isolated profile; no prompt sent.\n`
-  );
 } finally {
   if (child.exitCode === null && child.signalCode === null) {
     const closed = once(child, "exit");
@@ -145,3 +144,10 @@ try {
   }
   await rm(scratch, { recursive: true, force: true });
 }
+if (!adapterExit || adapterExit.code !== 0 || adapterExit.signal !== null) {
+  const status = adapterExit?.signal ?? adapterExit?.code ?? "unknown";
+  throw new Error(`ACP adapter exited unsuccessfully (${status})`);
+}
+process.stdout.write(
+  `OMP ${version.stdout.trim()}: ACP initialize/new/load passed in an isolated profile; no prompt sent.\n`
+);
