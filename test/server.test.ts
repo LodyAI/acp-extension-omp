@@ -342,7 +342,8 @@ describe("OMP ACP server lifecycle", () => {
         await client.request("session/new", { cwd: tmpdir(), mcpServers: [] });
         const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
           diagnostics.push(String(chunk));
-          return true;
+          // A broken stderr must not replace the force-termination failure.
+          throw new Error("synthetic stderr EPIPE");
         }) as typeof process.stderr.write);
         try {
           if (exitAfterForce) {

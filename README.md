@@ -64,7 +64,7 @@ Closing the ACP connection sends SIGTERM to the OMP process group on POSIX, or
 ends OMP stdin on Windows. After a one-second grace period the adapter
 force-terminates the owned child. If it still has not exited, close fails: the
 adapter writes the reason to stderr, releases that child without reaping it, and
-exits with code 1 instead of waiting on it.
+exits with code 1 instead of waiting on it (or by the received signal, below).
 On POSIX, SIGTERM, SIGINT, or SIGHUP sent to the adapter first runs the same
 close, then the adapter exits by that signal. SIGKILL cannot be intercepted.
 

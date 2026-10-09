@@ -137,7 +137,11 @@ export function serve(stream: Stream, options: ServeOptions) {
         owned.stdout?.destroy();
         owned.stderr?.destroy();
         const stuck = new Error("OMP child process did not exit after force termination", { cause: killError });
-        process.stderr.write(`acp-extension-omp: ${stuck.message} (pid ${owned.pid})\n`);
+        try {
+          process.stderr.write(`acp-extension-omp: ${stuck.message} (pid ${owned.pid})\n`);
+        } catch {
+          // The diagnostic is best effort; the rejection below still carries the original failure.
+        }
         throw stuck;
       }
     })().catch((error: unknown) => {

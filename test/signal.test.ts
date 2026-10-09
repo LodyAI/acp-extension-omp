@@ -142,7 +142,9 @@ describe.skipIf(process.platform === "win32")("adapter process shutdown signals"
       // The adapter released the child it could not terminate; it is left running, not reaped.
       expect(processExists(ompPid)).toBe(true);
     } finally {
-      if (ompPid !== undefined && processExists(ompPid)) process.kill(ompPid, "SIGKILL");
+      // This fixture never exits on its own, so also reap it when the test failed before reading its pid.
+      ompPid ??= Number(await readFile(join(ompDirectory, "child.pid"), "utf8").catch(() => "0"));
+      if (ompPid > 0 && processExists(ompPid)) process.kill(ompPid, "SIGKILL");
     }
   }, 15_000);
 });
