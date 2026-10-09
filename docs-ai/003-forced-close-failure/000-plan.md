@@ -73,3 +73,4 @@
 ## 修订记录
 
 - 更新于 2026-10-09：独立审核两轮，修复 FCF-001～003 — 见 [002-review-fixes.md](002-review-fixes.md)
+- 更新于 2026-10-09：夹具原子发布 pid 并加看门狗（FCF-004） — 见 [003-fixture-hardening.md](003-fixture-hardening.md)

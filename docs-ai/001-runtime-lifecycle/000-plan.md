@@ -68,3 +68,4 @@
 - 更新于 2026-10-09：prepack 改为直接调用本地 TypeScript 编译器 — 见 [004-prepack-compiler.md](004-prepack-compiler.md)
 - 更新于 2026-10-08：第一轮 review 修复与补充证据（补登此行） — 见 [002-review-fixes.md](002-review-fixes.md)
 - 更新于 2026-10-09：Windows CI 结果、eof 用例在 Windows 跳过，以及独立审核的处理 — 见 [005-windows-ci-review.md](005-windows-ci-review.md)
+- 更新于 2026-10-09：测试纳入类型检查，等待上限显式化（SIG-004、SIG-009） — 见 [006-test-typecheck.md](006-test-typecheck.md)

@@ -25,13 +25,18 @@ async function syntheticOmp(unkillable = false): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "acp-extension-omp-signal-"));
   const executable = join(directory, "omp");
   // "Unkillable" ignores SIGTERM and stdin EOF; SIGKILL is dropped in the adapter by DROP_GROUP_SIGKILL.
+  // Its watchdog bounds the orphan's life when a failed run never learns its pid.
   const holdOpen = unkillable
     ? `process.on("SIGTERM", () => {});
 require("node:net").createServer().listen(0, "127.0.0.1");
+setTimeout(() => process.exit(0), 30_000);
 `
     : "";
+  // Rename publishes the pid atomically, so a reader never sees a truncated number.
   await writeFile(executable, `#!/usr/bin/env node
-${holdOpen}require("node:fs").writeFileSync(require("node:path").join(__dirname, "child.pid"), String(process.pid));
+${holdOpen}const pidFile = require("node:path").join(__dirname, "child.pid");
+require("node:fs").writeFileSync(pidFile + ".tmp", String(process.pid));
+require("node:fs").renameSync(pidFile + ".tmp", pidFile);
 if (process.argv.slice(2).join(" ") !== "--mode rpc") process.exit(42);
 require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
   const command = JSON.parse(line);

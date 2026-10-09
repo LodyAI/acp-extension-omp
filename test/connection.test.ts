@@ -97,7 +97,9 @@ function peer(): Peer {
   const usages: SessionUsageUpdate[] = [];
   const host = {
     update: (notification: acp.SessionNotification) => onUpdate(notification),
-    usage: (usage: SessionUsageUpdate) => usages.push(usage),
+    usage: (usage: SessionUsageUpdate) => {
+      usages.push(usage);
+    },
     failure: () => {},
   };
   return {

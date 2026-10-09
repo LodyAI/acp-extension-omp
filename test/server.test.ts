@@ -14,10 +14,11 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const tempDirectories: string[] = [];
 
-// Forced close waits two real 1s grace periods (SIGTERM, then SIGKILL); leave slow-runner headroom.
+// Every wait names its bound: a forced close needs two real 1s grace periods (SIGTERM, then SIGKILL).
+const RPC_TIMEOUT_MS = 3_000;
 const FORCED_CLOSE_TIMEOUT_MS = 6_000;
 
-function withTimeout<T>(promise: Promise<T>, label: string, ms = 3_000): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, label: string, ms: number): Promise<T> {
   // Integration boundary: protect against a real ACP/child-process deadlock.
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
@@ -142,7 +143,7 @@ function harness(spawnProcess?: SyntheticSpawn, onParentFailure: (error: Error) 
   });
   return {
     closed: server.connection.closed,
-    request<T>(method, params) {
+    request<T>(method: string, params: Record<string, unknown>) {
       const id = ++nextId;
       const result = Promise.withResolvers<unknown>();
       pending.set(id, result);
@@ -182,7 +183,8 @@ describe("OMP ACP server lifecycle", () => {
       expect(initialized.agentInfo.name).toBe("omp-rpc");
       const session = await withTimeout(
         client.request<{ sessionId: string }>("session/new", { cwd: directory, mcpServers: [] }),
-        "session/new"
+        "session/new",
+        RPC_TIMEOUT_MS
       );
       expect(session.sessionId).toBe("/tmp/fake-omp-session.jsonl");
     } finally {
@@ -208,7 +210,7 @@ describe("OMP ACP server lifecycle", () => {
       void client
         .request("session/new", { cwd: directory, mcpServers: [] })
         .catch(() => undefined);
-      await withTimeout(client.closed, "ACP connection.closed");
+      await withTimeout(client.closed, "ACP connection.closed", RPC_TIMEOUT_MS);
       expect(client.isClosed()).toBe(true);
       expect(process.exitCode).toBe(1);
     } finally {
@@ -231,7 +233,8 @@ describe("OMP ACP server lifecycle", () => {
       await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
       await withTimeout(
         client.request("session/new", { cwd: directory, mcpServers: [] }),
-        "session/new"
+        "session/new",
+        RPC_TIMEOUT_MS
       );
       fixturePid = Number(await readFile(join(directory, "child.pid"), "utf8"));
       expect(fixturePid).toBeGreaterThan(0);
@@ -251,7 +254,7 @@ describe("OMP ACP server lifecycle", () => {
             const exited = Promise.withResolvers<void>();
             ownedChild.once("exit", () => exited.resolve());
             ownedChild.kill("SIGKILL");
-            await withTimeout(exited.promise, "synthetic OMP cleanup");
+            await withTimeout(exited.promise, "synthetic OMP cleanup", RPC_TIMEOUT_MS);
           } else if (fixturePid !== undefined && processExists(fixturePid)) {
             process.kill(fixturePid, "SIGKILL");
           }
@@ -289,8 +292,7 @@ describe("OMP ACP server lifecycle", () => {
           }
           return false;
         },
-      }) as unknown as ChildProcess & { killCalls: NodeJS.Signals[]; unref: ReturnType<typeof vi.fn> };
-      child.killCalls = killCalls;
+      });
 
       function exitChild(): void {
         child.exitCode = 0;
@@ -334,7 +336,8 @@ describe("OMP ACP server lifecycle", () => {
       const failures: Error[] = [];
       const diagnostics: string[] = [];
       const client = harness(
-        () => child,
+        // A structural double: serve only touches pid, stdio, exit state, kill, unref and events.
+        () => child as unknown as ChildProcess,
         (error) => failures.push(error)
       );
       try {
@@ -394,7 +397,7 @@ describe("OMP ACP server lifecycle", () => {
     try {
       closeOnSignals(client.serverClose, target);
       await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
-      await withTimeout(client.request("session/new", { cwd: directory, mcpServers: [] }), "session/new");
+      await withTimeout(client.request("session/new", { cwd: directory, mcpServers: [] }), "session/new", RPC_TIMEOUT_MS);
       const child = ownedChild;
       if (!child) throw new Error("serve did not spawn its OMP child");
       const reraised = Promise.withResolvers<void>();
@@ -403,7 +406,7 @@ describe("OMP ACP server lifecycle", () => {
         return true;
       });
       target.emit(signal);
-      await withTimeout(reraised.promise, "signal re-raise");
+      await withTimeout(reraised.promise, "signal re-raise", RPC_TIMEOUT_MS);
       expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
       expect(target.kill).toHaveBeenCalledExactlyOnceWith(4242, signal);
       expect(target.listenerCount(signal)).toBe(0);
@@ -422,7 +425,7 @@ describe("OMP ACP server lifecycle", () => {
     });
     closeOnSignals(() => Promise.reject(new Error("OMP child process did not exit after force termination")), target);
     target.emit("SIGTERM");
-    await withTimeout(reraised.promise, "signal re-raise");
+    await withTimeout(reraised.promise, "signal re-raise", RPC_TIMEOUT_MS);
     expect(target.kill).toHaveBeenCalledExactlyOnceWith(4242, "SIGTERM");
   });
   it("exits with the signal status when re-raising is unsupported", async () => {
@@ -438,7 +441,7 @@ describe("OMP ACP server lifecycle", () => {
     });
     closeOnSignals(() => Promise.resolve(), target);
     target.emit("SIGHUP");
-    await withTimeout(exited.promise, "signal exit fallback");
+    await withTimeout(exited.promise, "signal exit fallback", RPC_TIMEOUT_MS);
     expect(target.kill).toHaveBeenCalledExactlyOnceWith(4242, "SIGHUP");
     expect(target.exit).toHaveBeenCalledExactlyOnceWith(128 + constants.signals.SIGHUP);
   });
@@ -458,7 +461,7 @@ describe("OMP ACP server lifecycle", () => {
     for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) expect(target.listenerCount(signal)).toBe(0);
     target.emit("SIGINT");
     closing.resolve();
-    await withTimeout(reraised.promise, "signal re-raise");
+    await withTimeout(reraised.promise, "signal re-raise", RPC_TIMEOUT_MS);
     expect(target.kill).toHaveBeenCalledExactlyOnceWith(4242, "SIGTERM");
     expect(target.exit).not.toHaveBeenCalled();
   });
