@@ -57,6 +57,8 @@ if (${JSON.stringify(mode)} === "ignore-eof") {
   require("node:fs").writeFileSync(require("node:path").join(__dirname, "child.pid"), String(process.pid));
   const holdOpen = require("node:net").createServer();
   holdOpen.listen(0, "127.0.0.1");
+  // Bounds the orphan if the test runner dies before its cleanup runs.
+  setTimeout(() => process.exit(0), 30_000);
 }
 if (args.join(" ") !== "--mode rpc") process.exit(42);
 if (${JSON.stringify(mode)} === "eof") process.stdout.end();
