@@ -8,7 +8,7 @@
 
 本 README 不计入编号。已有编号条目及状态见文末索引。不要回填已有实现。
 
-下面的模板是唯一一份。`.omp/skills/write-ai-doc/SKILL.md` 是指向这里的触发器。不要在 skill 里再放一套模板，也不要把 skill 复制到别的 agent 技能目录。
+下面的模板是唯一一份。`.omp/skills/write-ai-doc/SKILL.md` 和 `.claude/skills/write-ai-doc/SKILL.md` 只是同一份触发说明的两个发现路径。不要在 skill 里再放一套模板。
 
 ## 何时写
 
@@ -21,7 +21,7 @@
 - 适配器与 Lody 的边界、所有权或集成顺序；详细归属只以 `MIGRATION.md` 为准，不在本仓库实现 Lody provider、runtime manifest、托管运行时解析、MCP 策略或 Lody 专用测试；
 - 结算、用量、取消或子进程失败。
 
-评审、调查、测试输出、测试运行、纯措辞、只改测试，都不建条目。拿不准就不写。
+评审、调查、测试输出、测试运行、纯措辞、只改测试，都不建条目。拿不准就不写。人明确要求为一次不合格工作建档时，可以建，但仍不能放软适配器边界。
 
 ## 编号
 
@@ -75,7 +75,7 @@
 - `omp` 不在 `PATH` 上就停止。不要下载，也不要捆绑。CI 变绿不是矩阵通过。
 - 只有 PR 确实存在时才写成 `#N`。
 - 非目标只写本条目。不要把 `AGENTS.md` 的边界清单抄进每一份计划。
-- 不要把 `docs-ai/` 或 `.omp/skills/` 加进 npm `files` 白名单。
+- 不要把 `docs-ai/`、`.omp/skills/` 或 `.claude/skills/` 加进 npm `files` 白名单。
 
 ## 模板
 
