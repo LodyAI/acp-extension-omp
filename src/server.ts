@@ -8,9 +8,32 @@ import packageJson from "../package.json" with { type: "json" };
 import { OmpRpcConnection } from "./connection.js";
 
 const SHUTDOWN_GRACE_MS = 1_000;
+const SHUTDOWN_POLL_MS = 25;
 
 function hasExited(child: ChildProcess): boolean {
   return child.exitCode !== null || child.signalCode !== null;
+}
+
+/** Signal 0 probes the OMP process group; anything but ESRCH means a member is still there. */
+function groupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+function stdioOpen(child: ChildProcess): boolean {
+  return [child.stdout, child.stderr].some((stream) => stream != null && !stream.closed && !stream.destroyed);
+}
+
+async function waitUntil(done: () => boolean, deadline: number): Promise<boolean> {
+  while (!done()) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, SHUTDOWN_POLL_MS));
+  }
+  return true;
 }
 
 async function waitForExit(child: ChildProcess): Promise<boolean> {
@@ -108,44 +131,58 @@ export function serve(stream: Stream, options: ServeOptions) {
       runtime?.close();
       const owned = child;
       if (!owned?.pid) return;
-      if (process.platform === "win32") owned.stdin?.end();
+      const pid = owned.pid;
+      const posix = process.platform !== "win32";
+      // On POSIX the whole OMP process group must be gone, not only its leader.
+      const settled = (): boolean => hasExited(owned) && (!posix || !groupAlive(pid));
+      const graceEnds = Date.now() + SHUTDOWN_GRACE_MS;
+      if (!posix) owned.stdin?.end();
       else {
         try {
-          process.kill(-owned.pid, "SIGTERM");
+          process.kill(-pid, "SIGTERM");
         } catch {
           // The owned process may have exited before the signal was delivered.
         }
       }
-      if (await waitForExit(owned)) return;
 
-      let killError: Error | undefined;
-      const recordKillError = (error: Error): void => {
-        killError ??= error;
-      };
-      owned.on("error", recordKillError);
-      try {
-        const sent = process.platform === "win32"
-          ? owned.kill("SIGKILL")
-          : process.kill(-owned.pid, "SIGKILL");
-        if (!sent && !hasExited(owned)) killError ??= new Error("OMP force-termination signal was not accepted");
-      } catch (error) {
-        killError ??= error instanceof Error ? error : new Error(String(error));
+      if (!((await waitForExit(owned)) && (await waitUntil(settled, graceEnds)))) {
+        let killError: Error | undefined;
+        const recordKillError = (error: Error): void => {
+          killError ??= error;
+        };
+        owned.on("error", recordKillError);
+        try {
+          const sent = posix ? process.kill(-pid, "SIGKILL") : owned.kill("SIGKILL");
+          if (!sent && !hasExited(owned)) killError ??= new Error("OMP force-termination signal was not accepted");
+        } catch (error) {
+          killError ??= error instanceof Error ? error : new Error(String(error));
+        }
+        const forceEnds = Date.now() + SHUTDOWN_GRACE_MS;
+        const exited = await waitForExit(owned);
+        owned.removeListener("error", recordKillError);
+        if (!exited || !hasExited(owned) || !(await waitUntil(settled, forceEnds))) {
+          // Release what could not be terminated so its handle and pipes no longer keep the adapter alive.
+          owned.unref();
+          owned.stdin?.destroy();
+          owned.stdout?.destroy();
+          owned.stderr?.destroy();
+          const what = hasExited(owned) ? "OMP process group" : "OMP child process";
+          const stuck = new Error(`${what} did not exit after force termination`, { cause: killError });
+          try {
+            process.stderr.write(`acp-extension-omp: ${stuck.message} (pid ${pid})\n`);
+          } catch {
+            // The diagnostic is best effort; the rejection below still carries the original failure.
+          }
+          throw stuck;
+        }
       }
-      const exited = await waitForExit(owned);
-      owned.removeListener("error", recordKillError);
-      if (!exited || !hasExited(owned)) {
-        // Release the unkillable child so its handle and pipes no longer keep the adapter alive.
-        owned.unref();
+
+      // A descendant that inherited OMP's stdio can hold the pipes open after OMP exits (on Windows the
+      // tree is not ours to kill). Let OMP's last output drain, but stop waiting after a second grace period.
+      if (!(await waitUntil(() => !stdioOpen(owned), graceEnds + SHUTDOWN_GRACE_MS))) {
         owned.stdin?.destroy();
         owned.stdout?.destroy();
         owned.stderr?.destroy();
-        const stuck = new Error("OMP child process did not exit after force termination", { cause: killError });
-        try {
-          process.stderr.write(`acp-extension-omp: ${stuck.message} (pid ${owned.pid})\n`);
-        } catch {
-          // The diagnostic is best effort; the rejection below still carries the original failure.
-        }
-        throw stuck;
       }
     })().catch((error: unknown) => {
       const failure = error instanceof Error ? error : new Error(String(error));

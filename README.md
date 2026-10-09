@@ -9,8 +9,8 @@ does not bundle OMP, inspect credentials, or persist user session data.
 This is a runnable collaboration branch, not a published Lody provider or an
 OMP compatibility release. Local verification covers OMP 18.3.1 on macOS arm64
 with Node 22.22.3 and a real OMP contract run against a loopback-only synthetic
-model. The 32 synthetic regression tests in `npm run check` do not use OMP and
-are not tied to that evidence row; one stdout-EOF case and five adapter-process
+model. The 35 synthetic regression tests in `npm run check` do not use OMP and
+are not tied to that evidence row; one stdout-EOF case and seven adapter-process
 cases run only on POSIX and are skipped on Windows. No production
 runtime manifest is changed.
 
@@ -62,9 +62,13 @@ fail the ACP connection rather than synthesizing a successful prompt result.
 
 Closing the ACP connection sends SIGTERM to the OMP process group on POSIX, or
 ends OMP stdin on Windows. After a one-second grace period the adapter
-force-terminates the owned child. If it still has not exited, close fails: the
-adapter writes the reason to stderr, releases that child without reaping it, and
-exits with code 1 instead of waiting on it (or by the received signal, below).
+force-terminates the owned child; on POSIX the whole process group must be gone,
+so descendants that outlive OMP are killed with it at the same deadline. If
+anything survives, close fails: the adapter writes the reason to stderr,
+releases what it could not reap, and exits with code 1 instead of waiting on it
+(or by the received signal, below). OMP's stdio is released within a second
+grace period even if a descendant still holds the pipes; on Windows such
+descendants are not reaped.
 On POSIX, SIGTERM, SIGINT, or SIGHUP sent to the adapter first runs the same
 close, then the adapter exits by that signal. SIGKILL cannot be intercepted.
 
@@ -88,7 +92,8 @@ after spawn failure, unexpected exit, EOF, and malformed RPC output. They also
 force-terminate a synthetic child that ignores EOF and SIGTERM, and reap OMP
 before re-raising a shutdown signal. On POSIX, a freshly compiled adapter process
 is also signalled directly and must exit by that signal with OMP reaped; it must
-exit with code 0 after stdin EOF, and with code 1 when OMP survives force
+exit with code 0 after stdin EOF, also when a grandchild ignores SIGTERM and
+holds OMP's pipes, and with code 1 when OMP or that grandchild survives force
 termination.
 
 `npm run smoke` covers initialize/new/load without sending a prompt.

@@ -94,6 +94,30 @@ function syntheticSpawn(directory: string, onSpawn?: (child: ChildProcess) => vo
   };
 }
 
+// Answers the synthetic OMP RPC commands that session/new needs, for in-process ChildProcess doubles.
+function answerRpc(stdin: PassThrough, stdout: PassThrough): void {
+  let buffered = "";
+  stdin.on("data", (bytes: Buffer) => {
+    buffered += bytes.toString();
+    for (;;) {
+      const separator = buffered.indexOf("\n");
+      if (separator < 0) break;
+      const command = JSON.parse(buffered.slice(0, separator)) as { id: string; type: string };
+      buffered = buffered.slice(separator + 1);
+      const data = command.type === "get_state"
+        ? { sessionFile: "/tmp/fake-omp-session.jsonl", model: { provider: "fixture", id: "model", name: "Fixture" } }
+        : {};
+      stdout.write(`${JSON.stringify({ type: "response", id: command.id, success: true, data })}\n`);
+    }
+  });
+}
+
+function noSuchProcess(): NodeJS.ErrnoException {
+  const error = new Error("No such process") as NodeJS.ErrnoException;
+  error.code = "ESRCH";
+  return error;
+}
+
 type Deferred<T> = {
   promise: Promise<T>;
   resolve(value: T | PromiseLike<T>): void;
@@ -301,31 +325,21 @@ describe("OMP ACP server lifecycle", () => {
         child.emit("exit", 0, null);
       }
 
-      let buffered = "";
-      child.stdin.on("data", (bytes: Buffer) => {
-        buffered += bytes.toString();
-        for (;;) {
-          const separator = buffered.indexOf("\n");
-          if (separator < 0) break;
-          const command = JSON.parse(buffered.slice(0, separator)) as { id: string; type: string };
-          buffered = buffered.slice(separator + 1);
-          const data = command.type === "get_state"
-            ? { sessionFile: "/tmp/fake-omp-session.jsonl", model: { provider: "fixture", id: "model", name: "Fixture" } }
-            : {};
-          child.stdout.write(`${JSON.stringify({ type: "response", id: command.id, success: true, data })}\n`);
-        }
-      });
+      answerRpc(child.stdin, child.stdout);
 
       const killSpy = process.platform === "win32"
         ? undefined
         : vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
             if (signal === "SIGTERM") return true;
+            // The double's process group lives exactly as long as the double itself.
+            if (signal === 0) {
+              if (child.exitCode !== null) throw noSuchProcess();
+              return true;
+            }
             if (signal === "SIGKILL") {
               if (failureMode === "false") {
                 if (exitAfterForce) queueMicrotask(exitChild);
-                const error = new Error("No such process") as NodeJS.ErrnoException;
-                error.code = "ESRCH";
-                throw error;
+                throw noSuchProcess();
               }
               queueMicrotask(() => {
                 child.emit("error", new Error("synthetic child kill failure"));
@@ -363,9 +377,8 @@ describe("OMP ACP server lifecycle", () => {
           expect(child.exitCode).toBe(0);
           expect(process.exitCode).toBe(previousExitCode);
           expect(failures).toEqual([]);
+          // Stdio is released on every path now; unref and the diagnostic mark only the failure branch.
           expect(child.unref).not.toHaveBeenCalled();
-          // stdin is ended by the normal RPC close; only the failure branch tears down the read side.
-          expect([child.stdout.destroyed, child.stderr.destroyed]).toEqual([false, false]);
           expect(diagnostics).toEqual([]);
         } else {
           expect(process.exitCode).toBe(1);
@@ -388,6 +401,54 @@ describe("OMP ACP server lifecycle", () => {
 
     await runScenario(false);
     await runScenario(true);
+  }, 3 * FORCED_CLOSE_TIMEOUT_MS);
+  it("releases OMP stdio when the child exits but inherited pipes stay open", async () => {
+    const previousExitCode = process.exitCode;
+    const signals: (NodeJS.Signals | number | undefined)[] = [];
+    // Exits on the close request but never ends its pipes, as when a grandchild still holds them.
+    const child = Object.assign(new EventEmitter(), {
+      pid: process.platform === "win32" ? 123_456_789 : Number.MAX_SAFE_INTEGER,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      unref: vi.fn(),
+      kill: vi.fn(() => true),
+    });
+    answerRpc(child.stdin, child.stdout);
+    child.stdin.on("finish", () => {
+      child.exitCode = 0;
+      child.emit("exit", 0, null);
+    });
+    const killSpy = process.platform === "win32"
+      ? undefined
+      : vi.spyOn(process, "kill").mockImplementation(((_pid: number, signal?: NodeJS.Signals | number) => {
+          signals.push(signal);
+          if (signal === 0 && child.exitCode !== null) throw noSuchProcess();
+          return true;
+        }) as typeof process.kill);
+    const failures: Error[] = [];
+    const client = harness(() => child as unknown as ChildProcess, (error) => failures.push(error));
+    try {
+      await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      await client.request("session/new", { cwd: tmpdir(), mcpServers: [] });
+      const started = Date.now();
+      await withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS);
+      expect(Date.now() - started).toBeLessThan(FORCED_CLOSE_TIMEOUT_MS);
+      expect([child.stdout.destroyed, child.stderr.destroyed]).toEqual([true, true]);
+      expect(failures).toEqual([]);
+      expect(process.exitCode).toBe(previousExitCode);
+      expect(child.unref).not.toHaveBeenCalled();
+      expect(child.kill).not.toHaveBeenCalled();
+      expect(signals).not.toContain("SIGKILL");
+    } finally {
+      killSpy?.mockRestore();
+      child.stdout.destroy();
+      child.stdin.destroy();
+      child.stderr.destroy();
+      process.exitCode = previousExitCode;
+    }
   }, 3 * FORCED_CLOSE_TIMEOUT_MS);
   it.each(["SIGTERM", "SIGINT", "SIGHUP"] as const)("reaps OMP before re-raising %s", async (signal) => {
     const directory = await fakeOmp("serve");
