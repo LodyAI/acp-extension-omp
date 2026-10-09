@@ -69,7 +69,9 @@ stderr, releases what it could not reap, and exits with code 1 instead of
 waiting on it (or by the received signal, below). OMP's stdio is released within
 a second grace period even if a descendant still holds the pipes. Descendants
 that left OMP's process group (for example via `setsid`), and all descendants on
-Windows, are not reaped.
+Windows, are not reaped. Unreaped zombies still count as group members, so where
+orphans are not reaped (for example a container whose PID 1 is not an init),
+close can report this failure for a group that has already died.
 On POSIX, SIGTERM, SIGINT, or SIGHUP sent to the adapter first runs the same
 close, then the adapter exits by that signal. SIGKILL cannot be intercepted.
 
