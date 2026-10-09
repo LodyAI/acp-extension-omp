@@ -128,6 +128,29 @@ describe.skipIf(process.platform === "win32")("adapter process shutdown signals"
     }
   }, 15_000);
 
+  // Guards the ordinary shutdown: no listener or handle may keep the compiled entry alive after EOF.
+  it("reaps OMP and exits with code 0 after stdin EOF", async () => {
+    const ompDirectory = await syntheticOmp();
+    cleanup.push(ompDirectory);
+    const adapter = startAdapter(join(buildDirectory, "index.js"), ompDirectory);
+    adapters.push(adapter.child);
+    let ompPid: number | undefined;
+    try {
+      await adapter.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const session = await adapter.request("session/new", { cwd: ompDirectory, mcpServers: [] });
+      expect(session.error).toBeUndefined();
+      ompPid = Number(await readFile(join(ompDirectory, "child.pid"), "utf8"));
+
+      adapter.child.stdin.end();
+      const [code, exitSignal] = await adapter.exited;
+      expect({ code, signal: exitSignal }).toEqual({ code: 0, signal: null });
+      expect(processExists(ompPid)).toBe(false);
+      expect(adapter.stderr()).toBe("");
+    } finally {
+      if (ompPid !== undefined && processExists(ompPid)) process.kill(ompPid, "SIGKILL");
+    }
+  }, 15_000);
+
   it("exits with code 1 when OMP survives force termination", async () => {
     const ompDirectory = await syntheticOmp(true);
     cleanup.push(ompDirectory);

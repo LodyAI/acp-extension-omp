@@ -40,6 +40,9 @@ type SignalTarget = Pick<NodeJS.EventEmitter, "on" | "removeListener"> & {
  * The detached OMP process group never sees signals sent to the adapter, so reap it first,
  * then re-raise the same signal. All listeners go on the first signal: a second one takes
  * Node's default exit at once, and so does the re-raise.
+ *
+ * Only POSIX exits by the signal itself. On Windows libuv re-raises SIGINT/SIGTERM as
+ * TerminateProcess(…, 1), so the status is 1; SIGHUP is ENOSYS there and takes the 128+n fallback.
  */
 export function closeOnSignals(close: () => Promise<void>, target: SignalTarget = process): void {
   const listeners = new Map<NodeJS.Signals, () => void>();
@@ -52,7 +55,7 @@ export function closeOnSignals(close: () => Promise<void>, target: SignalTarget 
           try {
             target.kill(target.pid, signal);
           } catch {
-            // Windows cannot raise every signal (SIGHUP is ENOSYS); keep a signal-shaped failure status.
+            // Windows cannot raise every signal (SIGHUP is ENOSYS); keep a non-zero, signal-numbered status.
             target.exit(128 + constants.signals[signal]);
           }
         });
