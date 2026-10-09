@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
@@ -11,6 +11,8 @@ import { delimiter, dirname, join, resolve } from "node:path";
 const entry = resolve(process.argv[2] ?? "dist/index.js");
 const executable = process.argv[3];
 await access(entry);
+// Both the repo build and an installed package keep package.json one level above dist/.
+const adapterPackage = JSON.parse(await readFile(join(dirname(entry), "..", "package.json"), "utf8"));
 const version = spawnSync(executable ?? "omp", ["--version"], { encoding: "utf8" });
 assert.equal(version.status, 0, "OMP executable must be available");
 assert.match(version.stdout, /^omp\//);
@@ -115,7 +117,18 @@ try {
   const port = endpoint.address().port;
   await writeFile(join(agentDir, "models.yml"), `providers:\n  contract:\n    baseUrl: http://127.0.0.1:${port}/v1\n    api: openai-completions\n    auth: none\n    models:\n      - id: contract-model\n        name: Contract Model\n        reasoning: false\n        input: [text]\n        contextWindow: 262144\n        maxTokens: 256\n`);
   await writeFile(join(agentDir, "config.yml"), "modelRoles:\n  default: contract/contract-model\n  smol: contract/contract-model\n  slow: contract/contract-model\n");
-  const initialized = (client) => client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+  // Required case 1, and no unreviewed capability: load, resume, MCP, images and embedded context stay unadvertised.
+  const expectedInitialize = {
+    protocolVersion: 1,
+    agentInfo: { name: "omp-rpc", version: adapterPackage.version },
+    agentCapabilities: { promptCapabilities: { image: false, embeddedContext: false } },
+    authMethods: [],
+  };
+  const initialized = async (client) => {
+    const result = await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+    assert.deepEqual(result, expectedInitialize, "initialize must advertise exactly the reviewed capability set");
+    return result;
+  };
   const sessionParams = { cwd: workdir, mcpServers: [] };
   const promptParams = (sessionId) => ({ sessionId, prompt: [{ type: "text", text: "Return the synthetic response." }] });
   const usageFrames = (client) => client.events.filter((event) => event.method === "_lody/session/usage_update");

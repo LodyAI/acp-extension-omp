@@ -6,6 +6,7 @@ import { delimiter, dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { ndJsonStream } from "@agentclientprotocol/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import packageJson from "../package.json" with { type: "json" };
 import { closeOnSignals, serve } from "../src/server.js";
 
 type SyntheticSpawn = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
@@ -203,11 +204,17 @@ describe("OMP ACP server lifecycle", () => {
     process.env.PATH = [directory, previousPath ?? ""].join(delimiter);
     const client = harness(process.platform === "win32" ? syntheticSpawn(directory) : undefined);
     try {
-      const initialized = await client.request<{ agentInfo: { name: string } }>("initialize", {
+      const initialized = await client.request("initialize", {
         protocolVersion: 1,
         clientCapabilities: {},
       });
-      expect(initialized.agentInfo.name).toBe("omp-rpc");
+      // Exact match: an optional capability (load, resume, MCP, images, context) must not appear unreviewed.
+      expect(initialized).toEqual({
+        protocolVersion: 1,
+        agentInfo: { name: "omp-rpc", version: packageJson.version },
+        agentCapabilities: { promptCapabilities: { image: false, embeddedContext: false } },
+        authMethods: [],
+      });
       const session = await withTimeout(
         client.request<{ sessionId: string }>("session/new", { cwd: directory, mcpServers: [] }),
         "session/new",
