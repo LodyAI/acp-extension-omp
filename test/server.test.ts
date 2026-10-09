@@ -55,8 +55,7 @@ if (${JSON.stringify(mode)} === "ignore-eof") {
   holdOpen.listen(0, "127.0.0.1");
 }
 if (args.join(" ") !== "--mode rpc") process.exit(42);
-// Windows pipes have no half-close, so ending process.stdout never reaches the reader; close fd 1 itself.
-if (${JSON.stringify(mode)} === "eof") require("node:fs").closeSync(1);
+if (${JSON.stringify(mode)} === "eof") process.stdout.end();
 if (${JSON.stringify(mode)} === "malformed") process.stdout.write("not-json\\n");
 const input = readline.createInterface({ input: process.stdin });
 input.on("line", (line) => {
@@ -189,7 +188,9 @@ describe("OMP ACP server lifecycle", () => {
     }
   });
 
-  it.each(["exit", "eof", "malformed", "missing"] as const)("closes the actual ACP connection after OMP %s", async (mode) => {
+  it.for(["exit", "eof", "malformed", "missing"] as const)("closes the actual ACP connection after OMP %s", async (mode, { skip }) => {
+    // A live Node process cannot EOF its stdout on Windows: libuv duplicates the stdio pipe handle and never closes fds 0-2.
+    if (mode === "eof" && process.platform === "win32") skip();
     const directory = await fakeOmp(mode);
     const previousPath = process.env.PATH;
     const previousExitCode = process.exitCode;
