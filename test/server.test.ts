@@ -55,7 +55,8 @@ if (${JSON.stringify(mode)} === "ignore-eof") {
   holdOpen.listen(0, "127.0.0.1");
 }
 if (args.join(" ") !== "--mode rpc") process.exit(42);
-if (${JSON.stringify(mode)} === "eof") process.stdout.end();
+// Windows pipes have no half-close, so ending process.stdout never reaches the reader; close fd 1 itself.
+if (${JSON.stringify(mode)} === "eof") require("node:fs").closeSync(1);
 if (${JSON.stringify(mode)} === "malformed") process.stdout.write("not-json\\n");
 const input = readline.createInterface({ input: process.stdin });
 input.on("line", (line) => {
