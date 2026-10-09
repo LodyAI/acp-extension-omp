@@ -80,3 +80,5 @@ OMP 意外退出时，`abortParent` 走 `close(true)`，也会遇到同样的挂
 - 实现后交给独立 reviewer 至少两轮审核。
 
 ## 修订记录
+
+- 更新于 2026-10-09：Lody 独立审核，改用单调时钟、补测试守护最后输出与释放上限、收窄 README 措辞（LDY-009～012） — 见 [002-review-fixes.md](002-review-fixes.md)

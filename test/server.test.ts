@@ -17,6 +17,7 @@ const tempDirectories: string[] = [];
 // Every wait names its bound: a forced close needs two real 1s grace periods (SIGTERM, then SIGKILL).
 const RPC_TIMEOUT_MS = 3_000;
 const FORCED_CLOSE_TIMEOUT_MS = 6_000;
+const STDIO_RELEASE_BOUND_MS = 2_500;
 
 function withTimeout<T>(promise: Promise<T>, label: string, ms: number): Promise<T> {
   // Integration boundary: protect against a real ACP/child-process deadlock.
@@ -402,6 +403,57 @@ describe("OMP ACP server lifecycle", () => {
     await runScenario(false);
     await runScenario(true);
   }, 3 * FORCED_CLOSE_TIMEOUT_MS);
+  it("delivers OMP's last stderr output written after its exit", async () => {
+    const previousExitCode = process.exitCode;
+    // Exits on the close request, then flushes a final diagnostic before its pipes end, as a real OMP may.
+    const child = Object.assign(new EventEmitter(), {
+      pid: process.platform === "win32" ? 123_456_789 : Number.MAX_SAFE_INTEGER,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      unref: vi.fn(),
+      kill: vi.fn(() => true),
+    });
+    answerRpc(child.stdin, child.stdout);
+    child.stdin.on("finish", () => {
+      child.exitCode = 0;
+      child.emit("exit", 0, null);
+      setTimeout(() => {
+        child.stderr.end("omp: final diagnostic\n");
+        child.stdout.end();
+      }, 300);
+    });
+    const killSpy = process.platform === "win32"
+      ? undefined
+      : vi.spyOn(process, "kill").mockImplementation(((_pid: number, signal?: NodeJS.Signals | number) => {
+          if (signal === 0 && child.exitCode !== null) throw noSuchProcess();
+          return true;
+        }) as typeof process.kill);
+    const forwarded: string[] = [];
+    const client = harness(() => child as unknown as ChildProcess);
+    try {
+      await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      await client.request("session/new", { cwd: tmpdir(), mcpServers: [] });
+      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
+        forwarded.push(String(chunk));
+        return true;
+      }) as typeof process.stderr.write);
+      try {
+        await withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS);
+      } finally {
+        stderrSpy.mockRestore();
+      }
+      expect(forwarded.join("")).toContain("omp: final diagnostic");
+    } finally {
+      killSpy?.mockRestore();
+      child.stdout.destroy();
+      child.stdin.destroy();
+      child.stderr.destroy();
+      process.exitCode = previousExitCode;
+    }
+  }, 3 * FORCED_CLOSE_TIMEOUT_MS);
   it("releases OMP stdio when the child exits but inherited pipes stay open", async () => {
     const previousExitCode = process.exitCode;
     const signals: (NodeJS.Signals | number | undefined)[] = [];
@@ -433,9 +485,18 @@ describe("OMP ACP server lifecycle", () => {
     try {
       await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
       await client.request("session/new", { cwd: tmpdir(), mcpServers: [] });
-      const started = Date.now();
-      await withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS);
-      expect(Date.now() - started).toBeLessThan(FORCED_CLOSE_TIMEOUT_MS);
+      const started = performance.now();
+      const closing = client.close();
+      // A wall-clock step back mid-close (NTP, VM resume) must not stretch the bounded wait.
+      const realNow = Date.now.bind(Date);
+      const clockSpy = vi.spyOn(Date, "now").mockImplementation(() => realNow() - 60_000);
+      try {
+        await withTimeout(closing, "ACP server close", FORCED_CLOSE_TIMEOUT_MS);
+      } finally {
+        clockSpy.mockRestore();
+      }
+      // Two 1s grace periods bound the release; the slack covers polling and slow runners.
+      expect(performance.now() - started).toBeLessThan(STDIO_RELEASE_BOUND_MS);
       expect([child.stdout.destroyed, child.stderr.destroyed]).toEqual([true, true]);
       expect(failures).toEqual([]);
       expect(process.exitCode).toBe(previousExitCode);

@@ -9,7 +9,7 @@ does not bundle OMP, inspect credentials, or persist user session data.
 This is a runnable collaboration branch, not a published Lody provider or an
 OMP compatibility release. Local verification covers OMP 18.3.1 on macOS arm64
 with Node 22.22.3 and a real OMP contract run against a loopback-only synthetic
-model. The 35 synthetic regression tests in `npm run check` do not use OMP and
+model. The 36 synthetic regression tests in `npm run check` do not use OMP and
 are not tied to that evidence row; one stdout-EOF case and seven adapter-process
 cases run only on POSIX and are skipped on Windows. No production
 runtime manifest is changed.
@@ -62,13 +62,14 @@ fail the ACP connection rather than synthesizing a successful prompt result.
 
 Closing the ACP connection sends SIGTERM to the OMP process group on POSIX, or
 ends OMP stdin on Windows. After a one-second grace period the adapter
-force-terminates the owned child; on POSIX the whole process group must be gone,
-so descendants that outlive OMP are killed with it at the same deadline. If
-anything survives, close fails: the adapter writes the reason to stderr,
-releases what it could not reap, and exits with code 1 instead of waiting on it
-(or by the received signal, below). OMP's stdio is released within a second
-grace period even if a descendant still holds the pipes; on Windows such
-descendants are not reaped.
+force-terminates the owned child; on POSIX the whole OMP process group must be
+gone, so descendants still in that group are killed with it at the same
+deadline. If any of them survives, close fails: the adapter writes the reason to
+stderr, releases what it could not reap, and exits with code 1 instead of
+waiting on it (or by the received signal, below). OMP's stdio is released within
+a second grace period even if a descendant still holds the pipes. Descendants
+that left OMP's process group (for example via `setsid`), and all descendants on
+Windows, are not reaped.
 On POSIX, SIGTERM, SIGINT, or SIGHUP sent to the adapter first runs the same
 close, then the adapter exits by that signal. SIGKILL cannot be intercepted.
 

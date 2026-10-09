@@ -28,9 +28,10 @@ function stdioOpen(child: ChildProcess): boolean {
   return [child.stdout, child.stderr].some((stream) => stream != null && !stream.closed && !stream.destroyed);
 }
 
+/** Deadlines are on the monotonic `performance.now()` clock, so wall-clock steps cannot stretch a wait. */
 async function waitUntil(done: () => boolean, deadline: number): Promise<boolean> {
   while (!done()) {
-    if (Date.now() >= deadline) return false;
+    if (performance.now() >= deadline) return false;
     await new Promise((resolve) => setTimeout(resolve, SHUTDOWN_POLL_MS));
   }
   return true;
@@ -135,7 +136,7 @@ export function serve(stream: Stream, options: ServeOptions) {
       const posix = process.platform !== "win32";
       // On POSIX the whole OMP process group must be gone, not only its leader.
       const settled = (): boolean => hasExited(owned) && (!posix || !groupAlive(pid));
-      const graceEnds = Date.now() + SHUTDOWN_GRACE_MS;
+      const graceEnds = performance.now() + SHUTDOWN_GRACE_MS;
       if (!posix) owned.stdin?.end();
       else {
         try {
@@ -157,7 +158,7 @@ export function serve(stream: Stream, options: ServeOptions) {
         } catch (error) {
           killError ??= error instanceof Error ? error : new Error(String(error));
         }
-        const forceEnds = Date.now() + SHUTDOWN_GRACE_MS;
+        const forceEnds = performance.now() + SHUTDOWN_GRACE_MS;
         const exited = await waitForExit(owned);
         owned.removeListener("error", recordKillError);
         if (!exited || !hasExited(owned) || !(await waitUntil(settled, forceEnds))) {
