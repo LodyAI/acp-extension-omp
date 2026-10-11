@@ -31,7 +31,7 @@
 
 `npm run build` 只编译。
 
-`npm pack --dry-run` 证明 `files` 白名单。不要把 `docs-ai/`、`.omp/skills/` 或 `.claude/skills/` 加进白名单。
+`npm pack --dry-run` 证明 `files` 白名单。它会先触发 `prepack`，删除并重建 `dist/`，所以不是无副作用的只读检查。不要把 `docs-ai/`、`.omp/skills/` 或 `.claude/skills/` 加进白名单。
 
 `npm run smoke` 仅当 `omp --version` 的 stdout 以 `omp/` 开头时才跑。它覆盖 initialize、new、load，不发 prompt。通过不等于生产支持，也不授权宣告 load、resume 或 usage。
 

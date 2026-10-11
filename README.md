@@ -7,9 +7,12 @@ does not bundle OMP, inspect credentials, or persist user session data.
 ## Collaboration status
 
 This is a runnable collaboration branch, not a published Lody provider or an
-OMP compatibility release. Local verification covers OMP 18.3.1 on macOS arm64,
-Node 22.22.3, 18 regression tests, and a real OMP contract run against a
-loopback-only synthetic model. No production runtime manifest is changed.
+OMP compatibility release. Local verification covers OMP 18.3.1 (Node 22.22.3)
+and OMP 18.8.4 (Node 26.10.0 and 22.15.0) on macOS arm64, with real OMP contract
+runs against a loopback-only synthetic model. The 36 synthetic regression tests in `npm run check` do not use OMP and
+are not tied to that evidence row; one stdout-EOF case and seven adapter-process
+cases run only on POSIX and are skipped on Windows. No production
+runtime manifest is changed.
 
 Before release, the 18.2.8/stable-version and OS matrices, independent maintainer
 review, reproducible runtime archive, public checksum read-back, and Lody
@@ -23,7 +26,7 @@ end-to-end acceptance must pass. These gates are recorded in `TESTING.md` and
 For collaborators:
 
 ```sh
-git clone --branch feat/initial-omp-adapter https://github.com/LodyAI/acp-extension-omp.git
+git clone --branch main https://github.com/LodyAI/acp-extension-omp.git
 cd acp-extension-omp
 npm ci --ignore-scripts
 npm run check
@@ -57,6 +60,21 @@ The adapter launches only `omp --mode rpc`. OMP diagnostics go to stderr; ACP
 and OMP RPC traffic remain separate. Transport failure and child-process exit
 fail the ACP connection rather than synthesizing a successful prompt result.
 
+Closing the ACP connection sends SIGTERM to the OMP process group on POSIX, or
+ends OMP stdin on Windows. After a one-second grace period the adapter
+force-terminates the owned child; on POSIX the whole OMP process group must be
+gone, so descendants still in that group are killed with it at the same
+deadline. If any of them survives, close fails: the adapter writes the reason to
+stderr, releases what it could not reap, and exits with code 1 instead of
+waiting on it (or by the received signal, below). OMP's stdio is released within
+a second grace period even if a descendant still holds the pipes. Descendants
+that left OMP's process group (for example via `setsid`), and all descendants on
+Windows, are not reaped. Unreaped zombies still count as group members, so where
+orphans are not reaped (for example a container whose PID 1 is not an init),
+close can report this failure for a group that has already died.
+On POSIX, SIGTERM, SIGINT, or SIGHUP sent to the adapter first runs the same
+close, then the adapter exits by that signal. SIGKILL cannot be intercepted.
+
 ## Validation
 
 Run the locked dependency graph in a clean checkout:
@@ -73,7 +91,13 @@ npm pack --dry-run
 Synthetic regressions cover native session identity, missing files, active
 session admission, native settlement, usage deduplication, cancellation, and
 notification ordering. Lifecycle tests await the actual SDK connection closure
-after spawn failure, unexpected exit, EOF, and malformed RPC output.
+after spawn failure, unexpected exit, EOF, and malformed RPC output. They also
+force-terminate a synthetic child that ignores EOF and SIGTERM, and reap OMP
+before re-raising a shutdown signal. On POSIX, a freshly compiled adapter process
+is also signalled directly and must exit by that signal with OMP reaped; it must
+exit with code 0 after stdin EOF, also when a grandchild ignores SIGTERM and
+holds OMP's pipes, and with code 1 when OMP or that grandchild survives force
+termination.
 
 `npm run smoke` covers initialize/new/load without sending a prompt.
 `npm run contract` drives real OMP through a loopback-only synthetic model, in a
@@ -88,7 +112,7 @@ also accepts an explicit OMP executable:
 npm run contract -- /path/to/installed/dist/index.js /path/to/verified/omp
 ```
 
-Local evidence currently covers OMP 18.3.1, Node 22.22.3, macOS arm64, including
+Local evidence currently covers OMP 18.3.1 and 18.8.4 on macOS arm64, including
 an independently installed npm tarball. It does not establish the 18.2.8 baseline,
 all supported operating systems, automatic compaction, arbitrary extensions, or
 real-provider quality. See `TESTING.md` for remaining gates.

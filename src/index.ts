@@ -2,7 +2,7 @@
 import { Readable, Writable } from "node:stream";
 import { ndJsonStream } from "@agentclientprotocol/sdk";
 
-import { serve } from "./server.js";
+import { closeOnSignals, serve } from "./server.js";
 
 const input = Readable.toWeb(process.stdin) as unknown as ReadableStream<Uint8Array>;
 const server = serve(ndJsonStream(Writable.toWeb(process.stdout), input), {
@@ -11,3 +11,4 @@ const server = serve(ndJsonStream(Writable.toWeb(process.stdout), input), {
     process.stdout.destroy();
   },
 });
+closeOnSignals(server.close);
