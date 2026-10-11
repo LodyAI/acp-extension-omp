@@ -82,3 +82,4 @@ OMP 意外退出时，`abortParent` 走 `close(true)`，也会遇到同样的挂
 ## 修订记录
 
 - 更新于 2026-10-09：Lody 独立审核，改用单调时钟、补测试守护最后输出与释放上限、收窄 README 措辞（LDY-009～012） — 见 [002-review-fixes.md](002-review-fixes.md)
+- 更新于 2026-10-11：确认退出后再给 stdio 一个宽限期排空，强杀路径不再丢最后的诊断 — 见 [003-drain-after-force-kill.md](003-drain-after-force-kill.md)

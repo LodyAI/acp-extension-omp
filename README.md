@@ -9,8 +9,8 @@ does not bundle OMP, inspect credentials, or persist user session data.
 This is a runnable collaboration branch, not a published Lody provider or an
 OMP compatibility release. Local verification covers OMP 18.3.1 (Node 22.22.3)
 and OMP 18.8.4 (Node 26.10.0 and 22.15.0) on macOS arm64, with real OMP contract
-runs against a loopback-only synthetic model. The 36 synthetic regression tests in `npm run check` do not use OMP and
-are not tied to that evidence row; one stdout-EOF case and seven adapter-process
+runs against a loopback-only synthetic model. The 39 synthetic regression tests in `npm run check` do not use OMP and
+are not tied to that evidence row; one stdout-EOF case and eight adapter-process
 cases run only on POSIX and are skipped on Windows. No production
 runtime manifest is changed.
 
@@ -66,14 +66,17 @@ force-terminates the owned child; on POSIX the whole OMP process group must be
 gone, so descendants still in that group are killed with it at the same
 deadline. If any of them survives, close fails: the adapter writes the reason to
 stderr, releases what it could not reap, and exits with code 1 instead of
-waiting on it (or by the received signal, below). OMP's stdio is released within
-a second grace period even if a descendant still holds the pipes. Descendants
+waiting on it (or by the received signal, below). Once OMP is confirmed gone, its stdio
+gets one more grace period to drain and is then released even if a descendant
+still holds the pipes. Descendants
 that left OMP's process group (for example via `setsid`), and all descendants on
 Windows, are not reaped. Unreaped zombies still count as group members, so where
 orphans are not reaped (for example a container whose PID 1 is not an init),
 close can report this failure for a group that has already died.
 On POSIX, SIGTERM, SIGINT, or SIGHUP sent to the adapter first runs the same
-close, then the adapter exits by that signal. SIGKILL cannot be intercepted.
+close, then the adapter exits by that signal. A second such signal during that
+close immediately sends SIGKILL to the OMP process group (the owned child on
+Windows) and the adapter exits by the second signal. SIGKILL cannot be intercepted.
 
 ## Validation
 
@@ -94,7 +97,9 @@ notification ordering. Lifecycle tests await the actual SDK connection closure
 after spawn failure, unexpected exit, EOF, and malformed RPC output. They also
 force-terminate a synthetic child that ignores EOF and SIGTERM, and reap OMP
 before re-raising a shutdown signal. On POSIX, a freshly compiled adapter process
-is also signalled directly and must exit by that signal with OMP reaped; it must
+is also signalled directly and must exit by that signal with OMP reaped, also
+when a second signal arrives during the grace period while a grandchild ignores
+SIGTERM; it must
 exit with code 0 after stdin EOF, also when a grandchild ignores SIGTERM and
 holds OMP's pipes, and with code 1 when OMP or that grandchild survives force
 termination.
