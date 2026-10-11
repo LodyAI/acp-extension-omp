@@ -6,7 +6,7 @@
 
 能力与发布边界留在 `README.md`、`COMPATIBILITY.md`、`TESTING.md`、`RELEASE.md`、`MIGRATION.md`。常驻适配器边界留在 `AGENTS.md`。不要把那些边界抄进每一个条目。
 
-本 README 不计入编号。当前尚无编号条目。不要回填已有实现。
+本 README 不计入编号。已有条目见下方索引；不要回填已有实现。
 
 下面的模板是唯一一份。`.omp/skills/write-ai-doc/SKILL.md` 是指向这里的触发器。不要在 skill 里再放一套模板，也不要把 skill 复制到别的 agent 技能目录。
 
@@ -171,4 +171,6 @@
 
 ## 索引
 
-尚无条目。不要回填。本 README 不计入编号。
+- 001 — [会话切换失败后的身份失效](001-session-switch-failure/000-plan.md) — 2026-10-07 — exact session 切换失败时使旧 ACP identity 失效。
+- 002 — [OMP 18.2.8 legacy RPC 终态](002-omp-1828-terminal-contract/000-plan.md) — 2026-10-07 — 真实兼容 legacy `agent_end`、provider error 与 usage 事件。
+- 003 — [审查发现的终态、取消与进程收尾](003-review-findings/000-plan.md) — 2026-10-10 — 混合终态、legacy abort 确认、通知顺序与跨平台进程关闭。

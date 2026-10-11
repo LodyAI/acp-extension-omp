@@ -7,14 +7,15 @@ does not bundle OMP, inspect credentials, or persist user session data.
 ## Collaboration status
 
 This is a runnable collaboration branch, not a published Lody provider or an
-OMP compatibility release. Local verification covers OMP 18.3.1 on macOS arm64,
-Node 22.22.3, 18 regression tests, and a real OMP contract run against a
-loopback-only synthetic model. No production runtime manifest is changed.
+OMP compatibility release. Current local macOS arm64 / Node 22.22.3 evidence
+covers OMP 18.2.8, installed 18.3.1, and stable 18.8.7/18.8.6 with a loopback-only
+synthetic model; 46 regression tests pass on the current source tree. No
+production runtime manifest is changed.
 
-Before release, the 18.2.8/stable-version and OS matrices, independent maintainer
-review, reproducible runtime archive, public checksum read-back, and Lody
-end-to-end acceptance must pass. These gates are recorded in `TESTING.md` and
-`RELEASE.md`; optional load/resume/usage advertisements remain disabled.
+Before release, the approved OS matrix, independent maintainer review,
+reproducible runtime archive, public checksum read-back, and Lody end-to-end
+acceptance must pass. These gates are recorded in `TESTING.md` and `RELEASE.md`;
+optional load/resume/usage advertisements remain disabled.
 
 改这个仓库的 agent 先读 `AGENTS.md`。能力与发布边界仍以 `README.md`、
 `COMPATIBILITY.md`、`TESTING.md`、`RELEASE.md`、`MIGRATION.md` 为准；
@@ -88,10 +89,12 @@ also accepts an explicit OMP executable:
 npm run contract -- /path/to/installed/dist/index.js /path/to/verified/omp
 ```
 
-Local evidence currently covers OMP 18.3.1, Node 22.22.3, macOS arm64, including
-an independently installed npm tarball. It does not establish the 18.2.8 baseline,
-all supported operating systems, automatic compaction, arbitrary extensions, or
-real-provider quality. See `TESTING.md` for remaining gates.
+Local evidence covers the official OMP 18.2.8 macOS arm64 release asset,
+installed 18.3.1, and the latest/previous stable releases 18.8.7/18.8.6 on
+macOS arm64 with Node 22.22.3. Each passed the isolated V1 real contract against
+a loopback-only synthetic model; see `TESTING.md` for binary digests and exact
+commands. These runs do not establish all supported operating systems, native
+background/compaction, arbitrary extensions, or real-provider quality.
 
 Locally handled OMP prompts (`agentInvoked: false`) complete without waiting for
 a terminal frame that will never arrive; `/help` completion is exercised by the

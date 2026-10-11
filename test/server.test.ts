@@ -1,9 +1,10 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ndJsonStream } from "@agentclientprotocol/sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import { serve } from "../src/server.js";
+import { installSignalShutdown } from "../src/lifecycle.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -18,7 +19,7 @@ function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-async function fakeOmp(mode: "serve" | "exit" | "eof" | "malformed" | "missing") {
+async function fakeOmp(mode: "serve" | "stubborn" | "exit" | "eof" | "malformed" | "diagnostic" | "missing") {
   const directory = await mkdtemp(join(tmpdir(), "acp-extension-omp-test-"));
   tempDirectories.push(directory);
   if (mode === "missing") return directory;
@@ -28,11 +29,17 @@ const readline = require("node:readline");
 const args = process.argv.slice(2);
 if (${JSON.stringify(mode)} === "exit") process.exit(23);
 if (args.join(" ") !== "--mode rpc") process.exit(42);
+if (${JSON.stringify(mode)} === "stubborn") {
+  require("node:fs").writeFileSync(${JSON.stringify(join(directory, "pid"))}, String(process.pid));
+  process.on("SIGTERM", () => {});
+  setInterval(() => {}, 60_000);
+}
 if (${JSON.stringify(mode)} === "eof") process.stdout.end();
 if (${JSON.stringify(mode)} === "malformed") process.stdout.write("not-json\\n");
+if (${JSON.stringify(mode)} === "diagnostic") process.stderr.write("provider-secret\\n");
 const input = readline.createInterface({ input: process.stdin });
 input.on("line", (line) => {
-  if (${JSON.stringify(mode)} !== "serve") return;
+  if (${JSON.stringify(mode)} !== "serve" && ${JSON.stringify(mode)} !== "stubborn" && ${JSON.stringify(mode)} !== "diagnostic") return;
   const command = JSON.parse(line);
   if (command.type === "new_session" || command.type === "switch_session") {
     process.stdout.write(JSON.stringify({ type: "response", id: command.id, command: command.type, success: true, data: {} }) + "\\n");
@@ -95,7 +102,7 @@ function harness(): Harness {
   });
   return {
     closed: server.connection.closed,
-    request<T>(method, params) {
+    request<T>(method: string, params: Record<string, unknown>) {
       const id = ++nextId;
       const result = Promise.withResolvers<unknown>();
       pending.set(id, result);
@@ -137,6 +144,74 @@ describe("OMP ACP server lifecycle", () => {
         "session/new"
       );
       expect(session.sessionId).toBe("/tmp/fake-omp-session.jsonl");
+    } finally {
+      process.env.PATH = previousPath;
+      await client.close();
+    }
+  });
+  it("does not forward raw OMP stderr diagnostics", async () => {
+    const directory = await fakeOmp("diagnostic");
+    const previousPath = process.env.PATH;
+    const writes: string[] = [];
+    const originalWrite = process.stderr.write;
+    process.stderr.write = ((chunk: string | Uint8Array, encoding?: BufferEncoding | ((error?: Error) => void), callback?: (error?: Error) => void) => {
+      writes.push(typeof chunk === "string" ? chunk : decoder.decode(chunk));
+      if (typeof encoding === "function") encoding();
+      else callback?.();
+      return true;
+    }) as typeof process.stderr.write;
+    process.env.PATH = `${directory}:${previousPath ?? ""}`;
+    const client = harness();
+    try {
+      await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      await withTimeout(client.request("session/new", { cwd: directory, mcpServers: [] }), "session/new");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(writes.join("")).not.toContain("provider-secret");
+    } finally {
+      process.stderr.write = originalWrite;
+      process.env.PATH = previousPath;
+      await client.close();
+    }
+  });
+  it.skipIf(process.platform === "win32")("cleans the OMP process group on host SIGTERM", async () => {
+    const directory = await fakeOmp("stubborn");
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${directory}:${dirname(process.execPath)}`;
+    const client = harness();
+    const removeSignals = installSignalShutdown(() => client.close(), process, () => {});
+    try {
+      await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      await withTimeout(client.request("session/new", { cwd: directory, mcpServers: [] }), "session/new");
+      const pid = Number(await readFile(join(directory, "pid"), "utf8"));
+      process.emit("SIGTERM");
+      const exited = new Promise<void>((resolve) => {
+        const timer = setInterval(() => {
+          try {
+            process.kill(pid, 0);
+          } catch {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 10);
+      });
+      await withTimeout(exited, "host SIGTERM shutdown");
+    } finally {
+      process.env.PATH = previousPath;
+      removeSignals();
+      await client.close();
+    }
+  });
+  it.skipIf(process.platform === "win32")("kills an unresponsive OMP process group after the grace period", async () => {
+    const directory = await fakeOmp("stubborn");
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${directory}:${dirname(process.execPath)}`;
+    const client = harness();
+    try {
+      await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      await withTimeout(client.request("session/new", { cwd: directory, mcpServers: [] }), "session/new");
+      const pid = Number(await readFile(join(directory, "pid"), "utf8"));
+      await withTimeout(client.close(), "unresponsive OMP shutdown");
+      expect(() => process.kill(pid, 0)).toThrow();
     } finally {
       process.env.PATH = previousPath;
       await client.close();

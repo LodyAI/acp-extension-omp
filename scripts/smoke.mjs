@@ -7,10 +7,6 @@ import { join, resolve } from "node:path";
 
 const entry = resolve(process.argv[2] ?? "dist/index.js");
 await access(entry);
-const version = spawnSync("omp", ["--version"], { encoding: "utf8" });
-if (version.error || version.status !== 0 || !version.stdout.startsWith("omp/")) {
-  throw new Error("OMP is required on PATH for the ACP adapter smoke");
-}
 
 const scratch = await mkdtemp(join(tmpdir(), "lody-omp-smoke-"));
 const home = join(scratch, "home");
@@ -55,6 +51,10 @@ const env = {
       }
     : {}),
 };
+const version = spawnSync("omp", ["--version"], { encoding: "utf8", env });
+if (version.error || version.status !== 0 || !version.stdout.startsWith("omp/")) {
+  throw new Error("OMP is required on PATH for the ACP adapter smoke");
+}
 
 const child = spawn(process.execPath, [entry], {
   cwd: workdir,
@@ -62,10 +62,7 @@ const child = spawn(process.execPath, [entry], {
   stdio: ["pipe", "pipe", "pipe"],
   windowsHide: true,
 });
-let stderr = "";
-child.stderr.on("data", (chunk) => {
-  stderr += chunk.toString();
-});
+child.stderr.resume();
 const pending = new Map();
 let nextRequestId = 0;
 createInterface({ input: child.stdout }).on("line", (line) => {
@@ -81,7 +78,7 @@ createInterface({ input: child.stdout }).on("line", (line) => {
 });
 child.on("exit", (code, signal) => {
   for (const response of pending.values()) {
-    response.reject(new Error(`OMP adapter exited (${code ?? signal}): ${stderr}`));
+    response.reject(new Error(`OMP adapter exited (${code ?? signal})`));
   }
   pending.clear();
 });

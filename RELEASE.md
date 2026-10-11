@@ -9,13 +9,29 @@ publish artifacts or update Lody's manifest from an unreviewed branch.
 - [x] Confirm canonical repository ownership and maintainer permissions.
 - [x] Keep the adapter independent from Lody's workspace and use a released,
       pinned `acp-extension-core` dependency.
-- [ ] Pass synthetic tests and the approved OMP version matrix.
+- [ ] Pass synthetic tests and the approved OMP version/OS matrix (46 tests and
+      four macOS arm64 OMP versions passed on the current source; other OSes remain unverified).
 - [ ] Review every advertised ACP capability against real-contract evidence.
-- [x] Run the build in a clean environment with a locked dependency graph.
-- [x] Inspect the npm archive file list for generated caches, sessions and
-      `node_modules`; independently install and smoke it.
-- [ ] Have an independent reviewer inspect source, tests, and release bytes.
+- [x] The current candidate's allowlist, production install/smoke/contracts, and
+      external Lody manager install/initialize passed after the inherited-key fix.
+- [ ] Have an independent maintainer review source, tests, and final release bytes.
 
+## Local candidate artifact evidence
+
+- Record each candidate archive's exact size and SHA-256 in the non-packaged
+  `docs-ai/003-review-findings/001-action.md`; do not embed a self-referential
+  digest in packaged documents.
+- The current candidate's 17-file allowlist, production install, smoke, and real
+  contracts for OMP 18.2.8, 18.3.1, 18.8.6, and 18.8.7 passed. Its external zstd
+  mirror also passed Lody manager download/integrity/extraction/install and ACP
+  initialize against a loopback server.
+- Candidate-specific evidence is byte-bound to the recorded archive digest. Local
+  checks do not establish cross-OS support, public artifact read-back, tracked
+  Lody manifest validity, or production acceptance.
+- Rebuild and repeat all checks after any source or packaged-document change.
+- Local checks do not establish cross-OS support, public artifact read-back,
+  tracked Lody manifest validity, or production acceptance.
+- No publication, public byte read-back, or Lody manifest update is authorized.
 
 ## Artifact acceptance
 

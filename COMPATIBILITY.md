@@ -6,10 +6,10 @@ Status: repository candidate; no production OMP version is declared supported ye
 
 | OMP version | Role | Required evidence | Current state |
 | --- | --- | --- | --- |
-| 18.2.8 | Minimum real-contract baseline for Lody #930 | initialize, new, prompt, cancel, exact load/resume, terminal ordering, restart-safe per-model usage, child failure | Official release and npm source located; no verified runnable binary obtained: asset TLS/download timeout and incomplete digest; isolated npm installation timed out. Not verified |
+| 18.2.8 | Minimum real-contract baseline for Lody #930 | Official macOS arm64 release asset, size/SHA-256 verified; isolated real adapter contract with loopback-only synthetic model | Verified on macOS arm64 / Node 22.22.3: initialize/new/prompt/cancel/exact load/resume/native error/legacy `agent_end` settlement/`responseId` usage/restart ordering passed. Not a production release declaration |
 | 18.3.1 | Installed local evidence, not a release declaration | Real adapter with a loopback-only model; source and installed package | initialize/new/prompt/cancel/exact load/resume, missing/invalid load, native error, usage attribution, restart scope and notification-before-terminal ordering passed on macOS arm64 / Node 22.22.3 |
-| Latest stable | Current compatibility target | Same V1 suite plus schema/behavior diff review | Version must be recorded when the test job is provisioned |
-| Previous stable | Regression target | Same V1 suite | Version must be recorded when the test job is provisioned |
+| 18.8.7 (latest stable on 2026-10-10) | Current compatibility target | Official macOS arm64 asset id `625097604`, 200,152,352 bytes, SHA-256 `cf0227bdefca0c486bd2aed1771de3ab98930266883eb69d341caf5665caee14`; isolated real adapter contract | V1 real contract passed on macOS arm64 / Node 22.22.3 / Core 0.1.8 with loopback-only synthetic model; not a production or cross-OS declaration |
+| 18.8.6 (previous stable on 2026-10-10) | Regression target | Official macOS arm64 asset id `622733471`, 212,684,064 bytes, SHA-256 `31faa0ee8420a13a783f4ca56d98f974e4a9f9081d269057a099f7eb618d113`; same isolated real adapter contract | V1 real contract passed on macOS arm64 / Node 22.22.3 / Core 0.1.8 with loopback-only synthetic model; not a production or cross-OS declaration |
 | Unknown/future | Probe only | Base RPC schema and each optional primitive | Do not infer compatibility from a higher version number |
 
 ## Runtime and release policy
@@ -19,10 +19,14 @@ The candidate withholds optional load/resume/usage capability advertisements
 until the baseline matrix and independent review pass. Explicit contract-runner
 calls still exercise those implementation paths.
 
-Terminal frames must supply a recognized status and boolean `sessionSettled`.
-A yielded result with `sessionSettled: false` does not release request admission:
-the adapter waits for native `session_settled`, then drains ACP notifications.
-Missing status or settlement fails instead of fabricating a successful outcome.
+Terminal handling follows observed RPC frame semantics, not a version threshold. On
+18.3.1, `agent_end.yielded` is not prompt completion; the adapter waits for
+`prompt_result.status` and boolean `sessionSettled`, then waits for native
+`session_settled` when required. On 18.2.8, terminal `agent_end.isTerminal` ends
+agent work; an assistant `stopReason: "error"` rejects the prompt, and usage
+deduplication uses `message.responseId`. Local-only prompts use
+`prompt_result.agentInvoked: false`. Unknown terminal semantics fail closed.
+
 Session changes exclude prompts; a failed native switch invalidates the previous
 ACP identity. Missing/empty native files fail before any switch request.
 

@@ -11,8 +11,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run test",
+    "check": "npm run typecheck && npm run typecheck:test && npm run test",
     "smoke": "node scripts/smoke.mjs",
     "contract": "node scripts/contract.mjs",
     "pack": "npm pack"

@@ -8,14 +8,18 @@ import { OmpRpcConnection } from "./connection.js";
 
 const SHUTDOWN_GRACE_MS = 1_000;
 
-async function waitForExit(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(resolve, SHUTDOWN_GRACE_MS);
-    child.once("exit", () => {
+async function waitForExit(child: ChildProcess): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  return new Promise<boolean>((resolve) => {
+    const onExit = () => {
       clearTimeout(timeout);
-      resolve();
-    });
+      resolve(true);
+    };
+    const timeout = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve(false);
+    }, SHUTDOWN_GRACE_MS);
+    child.once("exit", onExit);
   });
 }
 
@@ -60,12 +64,20 @@ export function serve(stream: Stream, options: ServeOptions) {
           // The owned process already exited.
         }
       }
-      await waitForExit(owned);
-      if (owned.exitCode === null && owned.signalCode === null && process.platform !== "win32") {
-        try {
-          process.kill(-owned.pid, "SIGKILL");
-        } catch {
-          // The process exited during the grace period.
+      const exited = await waitForExit(owned);
+      if (!exited) {
+        if (process.platform === "win32") {
+          try {
+            owned.kill();
+          } catch {
+            // The process exited during the grace period.
+          }
+        } else {
+          try {
+            process.kill(-owned.pid, "SIGKILL");
+          } catch {
+            // The process exited during the grace period.
+          }
         }
         await waitForExit(owned);
       }
@@ -90,7 +102,7 @@ export function serve(stream: Stream, options: ServeOptions) {
         stdio: ["pipe", "pipe", "pipe"],
         detached: process.platform !== "win32",
       });
-      child.stderr!.pipe(process.stderr, { end: false });
+      child.stderr!.resume();
       child.once("error", (error) => {
         abortParent(error instanceof Error ? error : new Error(String(error)));
       });

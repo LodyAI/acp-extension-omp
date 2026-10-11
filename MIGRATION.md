@@ -28,5 +28,18 @@ package source files.
 6. Read back public bytes, size, and SHA-256.
 7. Only then update Lody's tracked runtime manifest.
 
+## Current integration prerequisite
+
+The standalone adapter's hard contract is exactly `omp --mode rpc`. The
+current Lody checkout's local `packages/acp-extension-omp/AGENTS.md` still
+specifies `omp --mode rpc --no-ui`. The integration owner must reconcile that
+difference before updating Lody's tracked runtime manifest; this repository does
+not change Lody's worktree or silently add the extra argument.
+
+Local adapter contracts and a temporary artifact mirror do not prove Lody's
+tracked manifest or production acceptance. The throwaway manager install must
+use an external runtime root and loopback mirror. The `--no-ui` launch-argument
+difference above remains an integration-owner decision.
+
 OMP remains user-installed. No credential, cookie, token, provider configuration,
 user session, or OMP executable belongs in this repository or its artifacts.

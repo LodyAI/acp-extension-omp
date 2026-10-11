@@ -11,9 +11,6 @@ import { dirname, join, resolve } from "node:path";
 const entry = resolve(process.argv[2] ?? "dist/index.js");
 const executable = process.argv[3];
 await access(entry);
-const version = spawnSync(executable ?? "omp", ["--version"], { encoding: "utf8" });
-assert.equal(version.status, 0, "OMP executable must be available");
-assert.match(version.stdout, /^omp\//);
 const scratch = await mkdtemp(join(tmpdir(), "omp-contract-"));
 const home = join(scratch, "home");
 const workdir = join(scratch, "workspace");
@@ -21,6 +18,7 @@ const agentDir = join(home, ".omp", "profiles", "contract", "agent");
 const clients = [];
 let nextMode = "complete";
 let requestStarted;
+let abortAcknowledged;
 let requestCount = 0;
 const endpoint = createServer(async (request, response) => {
   for await (const _ of request) { /* Drain without storing prompts or headers. */ }
@@ -34,6 +32,8 @@ const endpoint = createServer(async (request, response) => {
   const chunk = (value) => response.write(`data: ${JSON.stringify({ id: "contract-completion", object: "chat.completion.chunk", created: 1, model: "contract-model", ...value })}\n\n`);
   chunk({ choices: [{ index: 0, delta: { role: "assistant", content: "contract answer" }, finish_reason: null }] });
   if (nextMode === "cancel") {
+    abortAcknowledged = Promise.withResolvers();
+    response.once("close", () => abortAcknowledged.resolve());
     requestStarted?.resolve();
     return; // Native abort closes this HTTP stream; no guessed sleeps.
   }
@@ -104,6 +104,9 @@ const env = {
 };
 try {
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(workdir, { recursive: true })]);
+  const version = spawnSync(executable ?? "omp", ["--version"], { encoding: "utf8", env });
+  assert.equal(version.status, 0, "OMP executable must be available");
+  assert.match(version.stdout, /^omp\//);
   if (executable) {
     const bin = join(scratch, "bin");
     await mkdir(bin);
@@ -132,7 +135,16 @@ try {
   assert.ok(initialUsage, "OMP terminal assistant usage must be forwarded");
   assert.equal(initialUsage.modelUsage["contract/contract-model"].inputTokens, 10);
   assert.equal(initialUsage.modelUsage["contract/contract-model"].outputTokens, 5);
-  assert.ok(first.events.indexOf(usageFrames(first).at(-1)) < first.events.findIndex((event) => event.result?.stopReason === "end_turn"), "Usage must precede terminal response");
+  const firstTerminalIndex = first.events.findIndex((event) => event.result?.stopReason === "end_turn");
+  assert.ok(firstTerminalIndex >= 0, "ACP prompt must produce a terminal response");
+  const firstNotifications = first.events.filter(
+    (event) => event.method === "session/update" || event.method === "_lody/session/usage_update",
+  );
+  assert.ok(firstNotifications.length > 0, "ACP prompt must produce session notifications");
+  assert.ok(
+    firstNotifications.every((event) => first.events.indexOf(event) < firstTerminalIndex),
+    "Every session/update and usage notification must precede the terminal response",
+  );
   await first.close();
   const resumed = start();
   await initialized(resumed);
@@ -146,9 +158,12 @@ try {
   assert.equal((await resumed.request("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text: "/help" }] })).stopReason, "end_turn");
   nextMode = "cancel";
   requestStarted = Promise.withResolvers();
+  abortAcknowledged = undefined;
   const cancelled = resumed.request("session/prompt", promptParams(session.sessionId));
   await deadline(requestStarted.promise, "Model stream started");
+  if (!abortAcknowledged) throw new Error("Native abort acknowledgement was not observable");
   resumed.notify("session/cancel", { sessionId: session.sessionId });
+  await deadline(abortAcknowledged.promise, "Native abort acknowledgement");
   assert.equal((await cancelled).stopReason, "cancelled");
   nextMode = "error";
   await assert.rejects(resumed.request("session/prompt", promptParams(session.sessionId)));
