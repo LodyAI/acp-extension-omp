@@ -25,24 +25,69 @@ type ActivePrompt = {
   resolve(value: acp.PromptResponse): void;
   reject(error: Error): void;
   done: Promise<acp.PromptResponse>;
+  generation: number;
   terminal?: Record<string, unknown>;
+  legacyTerminal: boolean;
+  abortState?: "requested" | "acknowledged";
+  pendingLegacyCancel?: boolean;
+  commandFailure?: Error;
 };
+
+const legacyStopReasons = new Set([
+  "stop",
+  "length",
+  "toolUse",
+  "aborted",
+  "error",
+]);
+
+const currentPromptStatuses = new Set(["completed", "aborted", "error"]);
+
+function hasOwn(frame: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(frame, key);
+}
+
+/** Apply current-protocol status/settlement rules; returns true when the prompt is still waiting. */
+function applyCurrentPromptSettlement(
+  active: ActivePrompt,
+  frame: Record<string, unknown>,
+  finish: (active: ActivePrompt, frame: Record<string, unknown>) => void,
+  fail: (error: Error) => void,
+): boolean {
+  if (
+    typeof frame.status !== "string" ||
+    !currentPromptStatuses.has(frame.status) ||
+    typeof frame.sessionSettled !== "boolean"
+  ) {
+    fail(new Error("OMP terminal result does not provide verified status and settlement"));
+    return false;
+  }
+  if (frame.sessionSettled) finish(active, frame);
+  else active.terminal = frame;
+  return !frame.sessionSettled;
+}
+
+const assistantMessageSchema = z.object({
+  role: z.literal("assistant"),
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  usage: z.object({
+    input: z.number().nonnegative(),
+    output: z.number().nonnegative(),
+    cacheRead: z.number().nonnegative(),
+    cacheWrite: z.number().nonnegative(),
+    reasoningTokens: z.number().nonnegative().optional(),
+    cost: z.object({ total: z.number().nonnegative() }).optional(),
+  }),
+});
 
 const assistantUsageFrameSchema = z.object({
   messageId: z.string().min(1),
-  message: z.object({
-    role: z.literal("assistant"),
-    provider: z.string().min(1),
-    model: z.string().min(1),
-    usage: z.object({
-      input: z.number().nonnegative(),
-      output: z.number().nonnegative(),
-      cacheRead: z.number().nonnegative(),
-      cacheWrite: z.number().nonnegative(),
-      reasoningTokens: z.number().nonnegative().optional(),
-      cost: z.object({ total: z.number().nonnegative() }).optional(),
-    }),
-  }),
+  message: assistantMessageSchema,
+});
+
+const legacyAssistantUsageFrameSchema = z.object({
+  message: assistantMessageSchema.extend({ responseId: z.string().min(1) }),
 });
 
 const textMessageUpdateFrameSchema = z.object({
@@ -78,7 +123,9 @@ function promptText(blocks: acp.ContentBlock[]): string {
 export class OmpRpcConnection {
   private readonly rpc: OmpRpcTransport;
   private sessionId = "";
+  private sessionGeneration = 0;
   private active: ActivePrompt | undefined;
+  private cancellationInFlight: ActivePrompt | undefined;
   private sessionChanging = false;
   private usage = new SessionUsageAccumulator();
   private notificationTail = Promise.resolve();
@@ -91,7 +138,7 @@ export class OmpRpcConnection {
 
   async newSession(request: acp.NewSessionRequest): Promise<acp.NewSessionResponse> {
     this.rejectMcp(request.mcpServers);
-    if (this.active || this.sessionChanging) throw new Error("OMP work is still active");
+    if (this.active || this.sessionChanging || this.cancellationInFlight) throw new Error("OMP work is still active");
     this.sessionChanging = true;
     try {
       this.sessionId = "";
@@ -115,20 +162,53 @@ export class OmpRpcConnection {
   }
 
   async prompt(request: acp.PromptRequest): Promise<acp.PromptResponse> {
-    if (this.active || this.sessionChanging) throw new Error("OMP work is still active");
+    if (this.active || this.sessionChanging || this.cancellationInFlight) throw new Error("OMP work is still active");
     this.assertSession(request.sessionId);
     const requestId = `prompt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const pending = deferred<acp.PromptResponse>();
-    this.active = { id: requestId, ...pending, done: pending.promise };
+    const active: ActivePrompt = {
+      id: requestId,
+      ...pending,
+      done: pending.promise,
+      generation: this.sessionGeneration,
+      legacyTerminal: true,
+    };
+    this.active = active;
     try {
-      const result = await this.rpc.requestWithId(requestId, "prompt", { message: promptText(request.prompt) });
-      if (z.object({ agentInvoked: z.literal(false) }).safeParse(result).success && this.active?.id === requestId) {
-        await this.finishPrompt(this.active, { status: "completed" });
+      const result = await this.rpc.requestWithId(
+        requestId,
+        "prompt",
+        { message: promptText(request.prompt) },
+        (error) => {
+          if (this.active === active) active.commandFailure = error;
+        },
+      );
+      const invoked = z.object({ agentInvoked: z.boolean() }).safeParse(result);
+      if (invoked.success && this.active === active && !invoked.data.agentInvoked) {
+        const record =
+          result !== null && typeof result === "object"
+            ? (result as Record<string, unknown>)
+            : {};
+        if (!hasOwn(record, "status") && !hasOwn(record, "sessionSettled")) {
+          await this.finishPrompt(active, { status: "completed" });
+        } else {
+          applyCurrentPromptSettlement(
+            active,
+            record,
+            (target, frame) => {
+              void this.finishPrompt(target, frame);
+            },
+            (error) => this.fail(error),
+          );
+        }
       }
     } catch (error) {
-      if (this.active?.id === requestId) {
-        this.active = undefined;
-        pending.reject(error instanceof Error ? error : new Error(String(error)));
+      if (this.active === active) {
+        active.commandFailure = this.promptError(error);
+        void this.finishPrompt(active, {
+          status: "error",
+          error: { message: active.commandFailure.message },
+        });
       }
     }
     return pending.promise;
@@ -136,10 +216,29 @@ export class OmpRpcConnection {
 
   async cancel(request: acp.CancelNotification): Promise<void> {
     this.assertSession(request.sessionId);
+    if (this.cancellationInFlight) throw new Error("OMP cancellation is still active");
     const active = this.active;
     if (!active) return;
-    await this.rpc.request("abort");
-    await active.done;
+    this.cancellationInFlight = active;
+    active.abortState = "requested";
+    try {
+      await this.rpc.request("abort");
+      active.abortState = "acknowledged";
+      if (active.terminal) void this.finishPrompt(active, active.terminal);
+      else if (active.pendingLegacyCancel) void this.finishPrompt(active, { status: "aborted" });
+      await active.done;
+    } catch (error) {
+      active.abortState = undefined;
+      if (this.active === active) {
+        void this.finishPrompt(active, {
+          status: "error",
+          error: { message: this.promptError(error).message },
+        });
+      }
+      throw error;
+    } finally {
+      if (this.cancellationInFlight === active) this.cancellationInFlight = undefined;
+    }
   }
 
   close(): void {
@@ -148,12 +247,12 @@ export class OmpRpcConnection {
 
   private async openExactSession(nativeSession: string): Promise<acp.NewSessionResponse> {
     if (!nativeSession) throw new Error("OMP native session id is required");
-    if (this.active || this.sessionChanging) throw new Error("OMP work is still active");
+    if (this.active || this.sessionChanging || this.cancellationInFlight) throw new Error("OMP work is still active");
     this.sessionChanging = true;
     try {
+      this.sessionId = "";
       const file = await stat(nativeSession);
       if (!file.isFile() || file.size === 0) throw new Error("OMP native session file is invalid");
-      this.sessionId = "";
       const result = await this.rpc.request("switch_session", { sessionPath: nativeSession });
       if (this.cancelled(result)) throw new Error("OMP cancelled session resume");
       return await this.prepareSession(nativeSession);
@@ -167,6 +266,7 @@ export class OmpRpcConnection {
     if (!state.sessionFile) throw new Error("OMP did not provide a persistent native session");
     if (expectedSession && state.sessionFile !== expectedSession) throw new Error("OMP selected a different session");
     this.sessionId = state.sessionFile;
+    this.sessionGeneration += 1;
     this.usage = new SessionUsageAccumulator();
     const configOptions: acp.SessionConfigOption[] = state.model
       ? [
@@ -188,22 +288,88 @@ export class OmpRpcConnection {
   }
 
   private event(frame: Record<string, unknown>): void {
-    if (frame.type === "prompt_result" && typeof frame.id === "string") {
-      const active = this.active;
-      if (!active || active.id !== frame.id) return;
-      if (!["completed", "aborted", "error"].includes(String(frame.status)) || typeof frame.sessionSettled !== "boolean") {
-        this.fail(new Error("OMP terminal result does not provide verified status and settlement"));
+    const active = this.active;
+    if (frame.type === "agent_end" && active) {
+      if (active.commandFailure) return;
+      if (hasOwn(frame, "yielded")) {
+        if (typeof frame.yielded !== "boolean") {
+          void this.finishPrompt(active, { status: "error" });
+          return;
+        }
+        active.legacyTerminal = false;
         return;
       }
-      if (frame.sessionSettled) void this.finishPrompt(active, frame);
-      else active.terminal = frame;
+      if (!active.legacyTerminal) return;
+      if (hasOwn(frame, "isTerminal")) {
+        if (typeof frame.isTerminal !== "boolean") {
+          void this.finishPrompt(active, { status: "error" });
+          return;
+        }
+        if (frame.isTerminal === false) return;
+      }
+      if (hasOwn(frame, "messages") && !Array.isArray(frame.messages)) {
+        void this.finishPrompt(active, { status: "error" });
+        return;
+      }
+      const messages = hasOwn(frame, "messages") && Array.isArray(frame.messages) ? frame.messages : [];
+      let assistantMessage: Record<string, unknown> | undefined;
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const value = messages[index];
+        if (value === null || typeof value !== "object") continue;
+        const message = value as Record<string, unknown>;
+        if (message.role === "assistant") {
+          assistantMessage = message;
+          break;
+        }
+      }
+      if (!assistantMessage) {
+        if (active.abortState === "requested") {
+          active.pendingLegacyCancel = true;
+          return;
+        }
+        if (active.abortState === "acknowledged") {
+          void this.finishPrompt(active, { status: "aborted" });
+          return;
+        }
+        void this.finishPrompt(active, { status: "error" });
+        return;
+      }
+      const assistantStopReason = assistantMessage.stopReason;
+      if (typeof assistantStopReason !== "string" || !legacyStopReasons.has(assistantStopReason)) {
+        void this.finishPrompt(active, { status: "error" });
+        return;
+      }
+      if (assistantStopReason === "error") {
+        void this.finishPrompt(active, { status: "error" });
+        return;
+      }
+      void this.finishPrompt(active, {
+        status: assistantStopReason === "aborted" ? "aborted" : "completed",
+      });
+      return;
+    }
+    if (frame.type === "prompt_result" && typeof frame.id === "string") {
+      if (!active || active.id !== frame.id || active.commandFailure) return;
+      const hasCurrentSettlement = hasOwn(frame, "status") || hasOwn(frame, "sessionSettled");
+      if (frame.agentInvoked === false && !hasCurrentSettlement) {
+        void this.finishPrompt(active, { status: "completed" });
+        return;
+      }
+      applyCurrentPromptSettlement(
+        active,
+        frame,
+        (target, terminal) => {
+          void this.finishPrompt(target, terminal);
+        },
+        (error) => this.fail(error),
+      );
       return;
     }
     if (frame.type === "session_settled" && this.active?.terminal) {
       void this.finishPrompt(this.active, this.active.terminal);
       return;
     }
-    if (frame.type === "message_end") this.accountUsage(frame);
+    if (frame.type === "message_end" && active) this.accountUsage(frame, active.generation);
     if (frame.type === "message_update") this.forwardMessage(frame);
   }
 
@@ -211,9 +377,10 @@ export class OmpRpcConnection {
     if (!this.sessionId || !this.active) return;
     const parsed = textMessageUpdateFrameSchema.safeParse(frame);
     if (!parsed.success) return;
+    const sessionId = this.sessionId;
     this.enqueueNotification(() =>
       this.host.update({
-        sessionId: this.sessionId,
+        sessionId,
         update: {
           sessionUpdate: "agent_message_chunk",
           content: { type: "text", text: parsed.data.assistantMessageEvent.delta },
@@ -222,10 +389,21 @@ export class OmpRpcConnection {
     );
   }
 
-  private accountUsage(frame: Record<string, unknown>): void {
+  private accountUsage(frame: Record<string, unknown>, generation: number): void {
+    const sessionId = this.sessionId;
+    if (!sessionId || generation !== this.sessionGeneration) return;
     const parsed = assistantUsageFrameSchema.safeParse(frame);
-    if (!parsed.success || !this.sessionId) return;
-    const { message, messageId } = parsed.data;
+    let message: z.infer<typeof assistantMessageSchema>;
+    let messageId: string;
+    if (parsed.success) {
+      message = parsed.data.message;
+      messageId = parsed.data.messageId;
+    } else {
+      const legacyParsed = legacyAssistantUsageFrameSchema.safeParse(frame);
+      if (!legacyParsed.success) return;
+      message = legacyParsed.data.message;
+      messageId = legacyParsed.data.message.responseId;
+    }
     const row = {
       inputTokens: message.usage.input,
       outputTokens: message.usage.output,
@@ -236,7 +414,7 @@ export class OmpRpcConnection {
         : { reasoningOutputTokens: message.usage.reasoningTokens }),
       ...(message.usage.cost?.total === undefined ? {} : { costUSD: message.usage.cost.total }),
     };
-    const usage = this.usage.update(this.sessionId, messageId, {
+    const usage = this.usage.update(sessionId, messageId, {
       [`${message.provider}/${message.model}`]: row,
     });
     if (usage) this.enqueueNotification(() => this.host.usage(usage));
@@ -255,23 +433,37 @@ export class OmpRpcConnection {
   }
 
   private async finishPrompt(active: ActivePrompt, frame: Record<string, unknown>): Promise<void> {
-    await this.notificationTail;
+    for (;;) {
+      const observed = this.notificationTail;
+      await observed;
+      if (this.notificationTail === observed) break;
+    }
     if (this.notificationFailure) {
       this.fail(this.notificationFailure);
       return;
     }
     if (this.active !== active) return;
+    const terminal = active.commandFailure
+      ? { status: "error", error: { message: active.commandFailure.message } }
+      : frame;
+    if (this.cancellationInFlight === active && active.abortState === "requested") {
+      active.terminal = terminal;
+      return;
+    }
     this.active = undefined;
-    if (frame.status === "completed") active.resolve({ stopReason: "end_turn" });
-    else if (frame.status === "aborted") active.resolve({ stopReason: "cancelled" });
-    else active.reject(new Error(this.errorMessage(frame)));
+    if (this.cancellationInFlight === active) this.cancellationInFlight = undefined;
+    if (terminal.status === "completed") active.resolve({ stopReason: "end_turn" });
+    else if (terminal.status === "aborted") active.resolve({ stopReason: "cancelled" });
+    else active.reject(active.commandFailure ?? new Error(this.errorMessage(terminal)));
   }
 
   private fail(error: Error): void {
+    const safe = this.safeError(error);
     const active = this.active;
     this.active = undefined;
-    active?.reject(error);
-    this.host.failure(error);
+    this.cancellationInFlight = undefined;
+    active?.reject(safe);
+    this.host.failure(safe);
   }
 
   private assertSession(sessionId: string): void {
@@ -286,8 +478,22 @@ export class OmpRpcConnection {
     return z.object({ cancelled: z.literal(true) }).safeParse(value).success;
   }
 
-  private errorMessage(frame: Record<string, unknown>): string {
-    const parsed = z.object({ error: z.object({ message: z.string().min(1) }).optional() }).safeParse(frame);
-    return parsed.success ? (parsed.data.error?.message ?? "OMP prompt failed") : "OMP prompt failed";
+  private errorMessage(_frame: Record<string, unknown>): string {
+    return "OMP prompt failed";
+  }
+
+  private promptError(error: unknown): Error {
+    return this.safeError(error instanceof Error ? error : new Error("OMP prompt failed"));
+  }
+
+  private safeError(error: Error): Error {
+    const allowed = [
+      "OMP RPC command failed",
+      "OMP RPC connection closed",
+      "OMP RPC stream closed",
+      "OMP RPC connection failed",
+      "OMP prompt failed",
+    ];
+    return new Error(allowed.includes(error.message) ? error.message : "OMP prompt failed");
   }
 }

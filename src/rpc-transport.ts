@@ -6,8 +6,8 @@ export type OmpStream = {
 type Pending = {
   resolve(value: unknown): void;
   reject(error: Error): void;
+  onError?: (error: Error) => void;
 };
-
 /** Ordered JSONL transport for OMP's RPC mode. */
 export class OmpRpcTransport {
   private readonly writer: WritableStreamDefaultWriter<Uint8Array>;
@@ -29,10 +29,15 @@ export class OmpRpcTransport {
     return this.requestWithId(id, type, fields);
   }
 
-  requestWithId(id: string, type: string, fields: Record<string, unknown> = {}): Promise<unknown> {
+  requestWithId(
+    id: string,
+    type: string,
+    fields: Record<string, unknown> = {},
+    onError?: (error: Error) => void,
+  ): Promise<unknown> {
     this.assertOpen();
     return new Promise<unknown>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { resolve, reject, onError });
       void this.send({ id, type, ...fields }).catch((error: unknown) => this.fail(error));
     });
   }
@@ -53,8 +58,16 @@ export class OmpRpcTransport {
 
   private fail(error: unknown): void {
     if (this.failure) return;
-    this.failure = error instanceof Error ? error : new Error(String(error));
-    for (const pending of this.pending.values()) pending.reject(this.failure);
+    const message =
+      error instanceof Error &&
+      ["OMP RPC connection closed", "OMP RPC stream closed"].includes(error.message)
+        ? error.message
+        : "OMP RPC connection failed";
+    this.failure = new Error(message);
+    for (const pending of this.pending.values()) {
+      pending.onError?.(this.failure);
+      pending.reject(this.failure);
+    }
     this.pending.clear();
     this.onFailure(this.failure);
   }
@@ -92,7 +105,11 @@ export class OmpRpcTransport {
       if (!pending) return;
       this.pending.delete(frame.id);
       if (frame.success === true) pending.resolve(frame.data);
-      else pending.reject(new Error(typeof frame.error === "string" ? frame.error : "OMP RPC command failed"));
+      else {
+        const error = new Error("OMP RPC command failed");
+        pending.onError?.(error);
+        pending.reject(error);
+      }
       return;
     }
     this.onEvent(frame);
