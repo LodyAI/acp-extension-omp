@@ -21,6 +21,15 @@ function processExists(pid: number): boolean {
   }
 }
 
+async function goneWithin(pid: number, ms: number): Promise<boolean> {
+  const deadline = performance.now() + ms;
+  while (processExists(pid)) {
+    if (performance.now() >= deadline) return false;
+    await new Promise((done) => setTimeout(done, 25));
+  }
+  return true;
+}
+
 type OmpMode = "serve" | "unkillable" | "straggler";
 
 // Ignores SIGTERM, inherits OMP's stdout/stderr, and publishes its pid only once the handler is in place.
@@ -221,6 +230,57 @@ describe.skipIf(process.platform === "win32")("adapter process shutdown signals"
     } finally {
       grandchildPid ??= Number(await readFile(join(ompDirectory, "grandchild.pid"), "utf8").catch(() => "0"));
       if (grandchildPid > 0 && processExists(grandchildPid)) process.kill(grandchildPid, "SIGKILL");
+    }
+  }, 15_000);
+
+  it("force-kills a SIGTERM-ignoring grandchild when a second signal arrives during grace", async () => {
+    const ompDirectory = await syntheticOmp("straggler");
+    cleanup.push(ompDirectory);
+    const adapter = startAdapter(join(buildDirectory, "index.js"), ompDirectory);
+    adapters.push(adapter.child);
+    let ompPid: number | undefined;
+    let grandchildPid: number | undefined;
+    try {
+      await adapter.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const session = await adapter.request("session/new", { cwd: ompDirectory, mcpServers: [] });
+      expect(session.error).toBeUndefined();
+      ompPid = await readPid(ompDirectory, "child.pid");
+      grandchildPid = await readPid(ompDirectory, "grandchild.pid");
+
+      // Real signals and the 1s grace cannot be faked: OMP dying proves close() has signaled the
+      // group, and the grandchild still alive proves the grace SIGKILL has not run yet.
+      const signaled = performance.now();
+      adapter.child.kill("SIGTERM");
+      const ompGone = performance.now() + 400;
+      while (processExists(ompPid) && performance.now() < ompGone) {
+        await new Promise((done) => setTimeout(done, 20));
+      }
+      expect(performance.now() - signaled).toBeLessThan(900);
+      expect(processExists(ompPid)).toBe(false);
+      expect(processExists(grandchildPid)).toBe(true);
+
+      adapter.child.kill("SIGINT");
+      const bounded = Promise.withResolvers<[number | null, NodeJS.Signals | null]>();
+      const timer = setTimeout(() => bounded.reject(new Error("adapter did not exit")), 3_000);
+      void adapter.exited.then(bounded.resolve, bounded.reject);
+      const [code, exitSignal] = await bounded.promise.finally(() => clearTimeout(timer));
+      expect({ code, signal: exitSignal }).toEqual({ code: null, signal: "SIGINT" });
+      // Shortly after, not the 30s watchdog. The grace timer died with the adapter, so only the
+      // second signal's SIGKILL can reap the grandchild.
+      expect(await goneWithin(ompPid, 1_000)).toBe(true);
+      expect(await goneWithin(grandchildPid, 1_000)).toBe(true);
+    } finally {
+      grandchildPid ??= Number(await readFile(join(ompDirectory, "grandchild.pid"), "utf8").catch(() => "0"));
+      ompPid ??= Number(await readFile(join(ompDirectory, "child.pid"), "utf8").catch(() => "0"));
+      for (const pid of [grandchildPid, ompPid]) {
+        if (pid > 0 && processExists(pid)) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // Already reaped between the probe and the kill.
+          }
+        }
+      }
     }
   }, 15_000);
 

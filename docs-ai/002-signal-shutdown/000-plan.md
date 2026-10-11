@@ -54,3 +54,4 @@
 - 更新于 2026-10-09：独立审核结果与信号相关发现的处理 — 见 [003-independent-review.md](003-independent-review.md)
 - 更新于 2026-10-09：补上适配器进程级的真实信号测试，关闭 SIG-005 — 见 [004-process-signal-test.md](004-process-signal-test.md)
 - 更新于 2026-10-09：目标 2 只在 POSIX 成立，写明 Windows 的退出状态 — 见 [005-windows-exit-status.md](005-windows-exit-status.md)
+- 更新于 2026-10-11：宽限期内的第二个信号先强杀 OMP 进程组再退出，强杀失败诊断改为同步写出 — 见 [006-second-signal-reap.md](006-second-signal-reap.md)

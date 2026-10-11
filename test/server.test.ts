@@ -1,3 +1,4 @@
+import type * as NodeFS from "node:fs";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -8,6 +9,26 @@ import { ndJsonStream } from "@agentclientprotocol/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import packageJson from "../package.json" with { type: "json" };
 import { closeOnSignals, serve } from "../src/server.js";
+
+// node:fs live bindings are not configurable, so vi.spyOn(writeSync) cannot see the diagnostic.
+const fsControl = vi.hoisted(() => ({
+  failFd2: false,
+  writes: [] as string[],
+}));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeFS>();
+  return {
+    ...actual,
+    writeSync: ((fd: number, data: string | NodeJS.ArrayBufferView, ...rest: never[]) => {
+      if (fd === 2 && fsControl.failFd2) {
+        fsControl.writes.push(String(data));
+        throw new Error("synthetic stderr EPIPE");
+      }
+      return actual.writeSync(fd, data as never, ...rest);
+    }) as typeof actual.writeSync,
+  };
+});
 
 type SyntheticSpawn = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 
@@ -358,7 +379,6 @@ describe("OMP ACP server lifecycle", () => {
             return true;
           }) as typeof process.kill);
       const failures: Error[] = [];
-      const diagnostics: string[] = [];
       const client = harness(
         // A structural double: serve only touches pid, stdio, exit state, kill, unref and events.
         () => child as unknown as ChildProcess,
@@ -367,11 +387,9 @@ describe("OMP ACP server lifecycle", () => {
       try {
         await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
         await client.request("session/new", { cwd: tmpdir(), mcpServers: [] });
-        const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
-          diagnostics.push(String(chunk));
-          // A broken stderr must not replace the force-termination failure.
-          throw new Error("synthetic stderr EPIPE");
-        }) as typeof process.stderr.write);
+        // writeSync(2) is synchronous, so the signal path cannot lose this line on an async pipe.
+        fsControl.failFd2 = true;
+        fsControl.writes.length = 0;
         try {
           if (exitAfterForce) {
             await withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS);
@@ -379,7 +397,7 @@ describe("OMP ACP server lifecycle", () => {
             await expect(withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS)).rejects.toThrow(/terminat|kill/i);
           }
         } finally {
-          stderrSpy.mockRestore();
+          fsControl.failFd2 = false;
         }
         if (exitAfterForce) {
           expect(child.exitCode).toBe(0);
@@ -387,7 +405,7 @@ describe("OMP ACP server lifecycle", () => {
           expect(failures).toEqual([]);
           // Stdio is released on every path now; unref and the diagnostic mark only the failure branch.
           expect(child.unref).not.toHaveBeenCalled();
-          expect(diagnostics).toEqual([]);
+          expect(fsControl.writes).toEqual([]);
         } else {
           expect(process.exitCode).toBe(1);
           expect(failures).toHaveLength(1);
@@ -395,7 +413,7 @@ describe("OMP ACP server lifecycle", () => {
           // The adapter must not stay alive on a child it could not terminate.
           expect(child.unref).toHaveBeenCalledOnce();
           expect([child.stdin.destroyed, child.stdout.destroyed, child.stderr.destroyed]).toEqual([true, true, true]);
-          expect(diagnostics.join("")).toMatch(/did not exit after force termination/);
+          expect(fsControl.writes.join("")).toMatch(/did not exit after force termination/);
         }
         if (process.platform === "win32") expect(killCalls).toEqual(["SIGKILL"]);
       } finally {
@@ -454,6 +472,83 @@ describe("OMP ACP server lifecycle", () => {
       }
       expect(forwarded.join("")).toContain("omp: final diagnostic");
     } finally {
+      killSpy?.mockRestore();
+      child.stdout.destroy();
+      child.stdin.destroy();
+      child.stderr.destroy();
+      process.exitCode = previousExitCode;
+    }
+  }, 3 * FORCED_CLOSE_TIMEOUT_MS);
+  it("delivers OMP's last stderr output written after force-kill", async () => {
+    const previousExitCode = process.exitCode;
+    let groupAlive = true;
+    const child = Object.assign(new EventEmitter(), {
+      pid: process.platform === "win32" ? 123_456_789 : Number.MAX_SAFE_INTEGER,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      unref: vi.fn(),
+      kill: vi.fn((signal: NodeJS.Signals) => {
+        if (signal === "SIGKILL") onForceKill();
+        return true;
+      }),
+    });
+    // Destroy can race the late write on the unfixed deadline; don't surface that as an unhandled error.
+    child.stdout.on("error", () => undefined);
+    child.stderr.on("error", () => undefined);
+    answerRpc(child.stdin, child.stdout);
+
+    const realNow = performance.now.bind(performance);
+    let skew = 0;
+    // SIGKILL confirmation can land after the absolute drain deadline (grace start + two grace
+    // periods). Jumping the monotonic clock there reproduces that without racing the 1s boundaries.
+    let lateDiagnostic: NodeJS.Timeout | undefined;
+    function onForceKill(): void {
+      skew = 5_000;
+      groupAlive = false;
+      child.signalCode = "SIGKILL";
+      child.emit("exit", null, "SIGKILL");
+      lateDiagnostic = setTimeout(() => {
+        child.stderr.end("omp: final diagnostic\n");
+        child.stdout.end();
+      }, 300);
+    }
+
+    const killSpy = process.platform === "win32"
+      ? undefined
+      : vi.spyOn(process, "kill").mockImplementation(((_pid: number, signal?: NodeJS.Signals | number) => {
+          if (signal === "SIGTERM") return true;
+          if (signal === 0) {
+            if (!groupAlive) throw noSuchProcess();
+            return true;
+          }
+          if (signal === "SIGKILL") {
+            onForceKill();
+            return true;
+          }
+          return true;
+        }) as typeof process.kill);
+    const forwarded: string[] = [];
+    const client = harness(() => child as unknown as ChildProcess);
+    try {
+      await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      await client.request("session/new", { cwd: tmpdir(), mcpServers: [] });
+      const clock = vi.spyOn(performance, "now").mockImplementation(() => realNow() + skew);
+      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
+        forwarded.push(String(chunk));
+        return true;
+      }) as typeof process.stderr.write);
+      try {
+        await withTimeout(client.close(), "ACP server close", FORCED_CLOSE_TIMEOUT_MS);
+      } finally {
+        stderrSpy.mockRestore();
+        clock.mockRestore();
+      }
+      expect(forwarded.join("")).toContain("omp: final diagnostic");
+    } finally {
+      clearTimeout(lateDiagnostic);
       killSpy?.mockRestore();
       child.stdout.destroy();
       child.stdin.destroy();
@@ -576,24 +671,54 @@ describe("OMP ACP server lifecycle", () => {
     expect(target.kill).toHaveBeenCalledExactlyOnceWith(4242, "SIGHUP");
     expect(target.exit).toHaveBeenCalledExactlyOnceWith(128 + constants.signals.SIGHUP);
   });
-  it("stops intercepting every shutdown signal after the first", async () => {
+  it("force-kills and exits on a second shutdown signal during grace", async () => {
     const closing = Promise.withResolvers<void>();
-    const reraised = Promise.withResolvers<void>();
+    const forceKill = vi.fn();
+    const target = Object.assign(new EventEmitter(), {
+      pid: 4242,
+      kill: vi.fn(() => true),
+      exit: vi.fn(),
+    });
+    closeOnSignals(() => closing.promise, target, forceKill);
+    target.emit("SIGTERM");
+    for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) expect(target.listenerCount(signal)).toBe(1);
+    expect(forceKill).not.toHaveBeenCalled();
+    expect(target.kill).not.toHaveBeenCalled();
+
+    target.emit("SIGINT");
+    expect(forceKill).toHaveBeenCalledOnce();
+    expect(target.kill).toHaveBeenCalledExactlyOnceWith(4242, "SIGINT");
+    for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) expect(target.listenerCount(signal)).toBe(0);
+
+    closing.resolve();
+    await closing.promise;
+    await Promise.resolve();
+    // close() finishing must not re-raise the first signal on top of the second.
+    expect(target.kill).toHaveBeenCalledExactlyOnceWith(4242, "SIGINT");
+    expect(target.exit).not.toHaveBeenCalled();
+  });
+  it("exits by the second signal when re-raising it is unsupported", async () => {
+    const closing = Promise.withResolvers<void>();
+    const forceKill = vi.fn();
     const target = Object.assign(new EventEmitter(), {
       pid: 4242,
       kill: vi.fn(() => {
-        reraised.resolve();
-        return true;
+        const error = new Error("function not implemented") as NodeJS.ErrnoException;
+        error.code = "ENOSYS";
+        throw error;
       }),
       exit: vi.fn(),
     });
-    closeOnSignals(() => closing.promise, target);
+    closeOnSignals(() => closing.promise, target, forceKill);
     target.emit("SIGTERM");
-    for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) expect(target.listenerCount(signal)).toBe(0);
     target.emit("SIGINT");
+    expect(forceKill).toHaveBeenCalledOnce();
+    expect(target.kill).toHaveBeenCalledExactlyOnceWith(4242, "SIGINT");
+    expect(target.exit).toHaveBeenCalledExactlyOnceWith(128 + constants.signals.SIGINT);
     closing.resolve();
-    await withTimeout(reraised.promise, "signal re-raise", RPC_TIMEOUT_MS);
-    expect(target.kill).toHaveBeenCalledExactlyOnceWith(4242, "SIGTERM");
-    expect(target.exit).not.toHaveBeenCalled();
+    await closing.promise;
+    await Promise.resolve();
+    expect(target.kill).toHaveBeenCalledOnce();
+    expect(target.exit).toHaveBeenCalledOnce();
   });
 });

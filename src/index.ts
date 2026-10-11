@@ -11,4 +11,4 @@ const server = serve(ndJsonStream(Writable.toWeb(process.stdout), input), {
     process.stdout.destroy();
   },
 });
-closeOnSignals(server.close);
+closeOnSignals(server.close, process, server.forceKill);

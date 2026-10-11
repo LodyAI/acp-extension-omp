@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { writeSync } from "node:fs";
 import { constants } from "node:os";
 import { Readable, Writable } from "node:stream";
 import { AgentSideConnection, RequestError, type Agent, type Stream } from "@agentclientprotocol/sdk";
@@ -62,26 +63,51 @@ type SignalTarget = Pick<NodeJS.EventEmitter, "on" | "removeListener"> & {
 
 /**
  * The detached OMP process group never sees signals sent to the adapter, so reap it first,
- * then re-raise the same signal. All listeners go on the first signal: a second one takes
- * Node's default exit at once, and so does the re-raise.
+ * then re-raise the same signal. Handlers stay up after the first signal: a second one must
+ * SIGKILL the group before Node's default exit, or a SIGTERM-ignoring grandchild is orphaned
+ * when the grace timer dies with the process. Re-raise once; close() finishing later must not
+ * raise again.
  *
  * Only POSIX exits by the signal itself. On Windows libuv re-raises SIGINT/SIGTERM as
  * TerminateProcess(…, 1), so the status is 1; SIGHUP is ENOSYS there and takes the 128+n fallback.
  */
-export function closeOnSignals(close: () => Promise<void>, target: SignalTarget = process): void {
+export function closeOnSignals(
+  close: () => Promise<void>,
+  target: SignalTarget = process,
+  forceKill: () => void = () => undefined,
+): void {
   const listeners = new Map<NodeJS.Signals, () => void>();
+  let shuttingDown = false;
+  let reRaised = false;
+
+  const reRaise = (signal: NodeJS.Signals): void => {
+    if (reRaised) return;
+    reRaised = true;
+    for (const [registered, registeredListener] of listeners) target.removeListener(registered, registeredListener);
+    try {
+      target.kill(target.pid, signal);
+    } catch {
+      // Windows cannot raise every signal (SIGHUP is ENOSYS); keep a non-zero, signal-numbered status.
+      target.exit(128 + constants.signals[signal]);
+    }
+  };
+
   for (const signal of SHUTDOWN_SIGNALS) {
     const listener = (): void => {
-      for (const [registered, registeredListener] of listeners) target.removeListener(registered, registeredListener);
+      if (shuttingDown) {
+        try {
+          forceKill();
+        } catch {
+          // Still exit by the second signal; a failed kill must not skip the re-raise.
+        }
+        reRaise(signal);
+        return;
+      }
+      shuttingDown = true;
       void close()
         .catch(() => undefined)
         .finally(() => {
-          try {
-            target.kill(target.pid, signal);
-          } catch {
-            // Windows cannot raise every signal (SIGHUP is ENOSYS); keep a non-zero, signal-numbered status.
-            target.exit(128 + constants.signals[signal]);
-          }
+          reRaise(signal);
         });
     };
     listeners.set(signal, listener);
@@ -170,7 +196,9 @@ export function serve(stream: Stream, options: ServeOptions) {
           const what = hasExited(owned) ? "OMP process group" : "OMP child process";
           const stuck = new Error(`${what} did not exit after force termination`, { cause: killError });
           try {
-            process.stderr.write(`acp-extension-omp: ${stuck.message} (pid ${pid})\n`);
+            // Synchronous: the signal path re-raises as soon as close() rejects, and an async
+            // pipe write can be dropped before the process exits.
+            writeSync(2, `acp-extension-omp: ${stuck.message} (pid ${pid})\n`);
           } catch {
             // The diagnostic is best effort; the rejection below still carries the original failure.
           }
@@ -179,8 +207,10 @@ export function serve(stream: Stream, options: ServeOptions) {
       }
 
       // A descendant that inherited OMP's stdio can hold the pipes open after OMP exits (on Windows the
-      // tree is not ours to kill). Let OMP's last output drain, but stop waiting after a second grace period.
-      if (!(await waitUntil(() => !stdioOpen(owned), graceEnds + SHUTDOWN_GRACE_MS))) {
+      // tree is not ours to kill). Drain for one grace period after the group is confirmed gone. The
+      // old absolute deadline (grace start + two periods) has usually already passed on the force-kill
+      // path, which would destroy the pipes and drop OMP's last diagnostics.
+      if (!(await waitUntil(() => !stdioOpen(owned), performance.now() + SHUTDOWN_GRACE_MS))) {
         owned.stdin?.destroy();
         owned.stdout?.destroy();
         owned.stderr?.destroy();
@@ -269,5 +299,17 @@ export function serve(stream: Stream, options: ServeOptions) {
   connection.signal.addEventListener("abort", () => {
     void close().catch(() => undefined);
   }, { once: true });
-  return { connection, close };
+  // Second shutdown signal: Node's default exit wins before the grace timer can SIGKILL.
+  const forceKill = (): void => {
+    const owned = child;
+    const pid = owned?.pid;
+    if (!pid) return;
+    try {
+      if (process.platform === "win32") owned.kill("SIGKILL");
+      else process.kill(-pid, "SIGKILL");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  };
+  return { connection, close, forceKill };
 }
