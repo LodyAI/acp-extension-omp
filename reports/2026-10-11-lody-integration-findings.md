@@ -13,17 +13,17 @@
 | 日期 | 2026-10-11 |
 | 机器 | macOS arm64，用户本机，作为 Lody 在线机器 |
 | Lody | 桌面端自带 CLI；`agent-config` 为 Custom ACP（`cliType: custom`） |
-| 适配器 | 可复现 tarball（构建自 `39d745a`，SHA-256 `c7729e02…f8a1`），独立安装在 `~/omp-lody-demo/adapter` |
+| 适配器 | 可复现 tarball（构建自 `39d745a`，SHA-256 `c7729e02…f8a1`），独立安装在用户 home 下的演示目录 |
 | OMP | 18.8.4（Homebrew，darwin-arm64） |
 | Node | 26.10.0（Lody 启动命令中的 `/opt/homebrew/bin/node`） |
-| OMP profile | 隔离：`HOME=~/omp-lody-demo/home`、`OMP_PROFILE=lody-demo`，只含用户自有的 MyTTAPI provider，默认模型 `MyTTAPI/gpt-6.1-sol` |
-| 工作目录 | `~/omp-lody-demo/workspace/omp-demo`（登记为 Lody 本地项目） |
-| 演示垫片 | `~/omp-lody-demo/shim.mjs`，只为绕过问题 LI-001；不在本仓库，也不是适配器的一部分 |
+| OMP profile | 隔离：独立的 `HOME` 与 `OMP_PROFILE`，只含用户自有的一个真实付费提供商，默认模型为该提供商的模型（`<redacted>`） |
+| 工作目录 | 演示目录下的 `omp-demo` 项目（登记为 Lody 本地项目） |
+| 演示垫片 | 演示目录下的 `shim.mjs`，只为绕过问题 LI-001；不在本仓库，也不是适配器的一部分 |
 
 测试会话：
 
-- `a9307642-1b36-4cad-830e-39131d8f7c3e`：未加垫片，失败（LI-001）。
-- `f35e08fc-3bbc-40ef-8d72-94df1061adc4`：加垫片后的四轮测试。
+- `<lody-session-1>`：未加垫片，失败（LI-001）。
+- `<lody-session-2>`：加垫片后的四轮测试。
 
 ## 测试结果总览
 
@@ -59,7 +59,7 @@
 ### LI-002 · P2 · 进程被回收后不能原生延续会话，只能靠文字回放
 
 - **现象**：第一轮结束约 20 s 后，Lody 用 SIGKILL 回收 agent 进程。第二轮时，Lody 日志依次为：
-  1. 用上一轮精确的 `sessionFile` 尝试恢复（`acpResumeSessionId=…/sessions/…01-43-06-482Z…jsonl`）；
+  1. 用上一轮精确的 `sessionFile` 尝试恢复（`acpResumeSessionId=<omp-session-file>`）；
   2. `ACP_RESUME_UNSUPPORTED (agent_did_not_advertise_resume_or_loadSession)`，试探进程被 SIGKILL；
   3. `ACP resume failed, attempting fallback with chat history replay`，新开 OMP 会话，并发送「回放 prompt」（`messages=2`，`chars=214`）。
 - **根因（事实）**：适配器 V1 按计划不宣告 `loadSession` 和 `resume`，要等基线矩阵和独立审核通过后才宣告。
@@ -73,13 +73,13 @@
 
 - **现象**：四轮测试后，用户在 Lody 界面上看不到这个会话的用量信息。
 - **适配器侧（事实）**：绕过 Lody 直接运行同一套隔离配置，发送一个短 prompt，适配器在轮次结束时发出 1 条 `_lody/session/usage_update`：
-  - 输入 531、输出 5、缓存读取 5632 tokens；
-  - 按 `MyTTAPI/gpt-6.1-sol` 归属；
-  - `costUSD` 为 0，来自用户 `models.yml` 中 MyTTAPI 的 cost 配置，是配置值，不是「未知」。
+  - 载荷包含输入、输出和缓存读取的 token 计数（具体数字为 `<redacted>`）；
+  - 按真实付费提供商的模型归属（`<redacted>`）；
+  - `costUSD` 来自用户 `models.yml` 中该提供商的 cost 配置，是配置值，不是「未知」。
 - **Lody 侧（事实）**：
   - Lody 内置的 `LODY_EXTENSION_METHODS.sessionUsageUpdate` 与适配器使用的方法名完全一致（`_lody/session/usage_update`），载荷结构也一致；
   - 日志在轮次收尾时出现 `Skipping session usage flush: cloud plane is offline`；
-  - 同一天当前的 Claude 会话（`cb2ca7cf…`）也出现了 7 次同样的提示，以及 completion notification、permission inbox 的同类跳过。
+  - 同一天另一个 Claude 会话（`<agent-session>`）也出现了 7 次同样的提示，以及 completion notification、permission inbox 的同类跳过。
 - **判断（推断）**：用量很可能卡在 Lody 的「cloud plane offline」状态，与适配器无关。还没确认的是：
   - 同一时段其他 agent（例如 Claude）的会话是否也没有用量；
   - 经过垫片后，Lody 是否确实收到了这条通知。
@@ -121,7 +121,7 @@
 
 ## 测试遗留物（待清理）
 
-- `~/omp-lody-demo/`：适配器安装、隔离 OMP profile（`models.yml` 含 MyTTAPI key，权限 600）、垫片、演示项目。
+- 本机演示目录：适配器安装、隔离 OMP profile、垫片、演示项目。
 - Lody 中的「OMP adapter (demo)」Agent 配置和 `omp-demo` 本地项目。
-- Apple container `omp-lody-test`：仍在运行，内含一份 MyTTAPI 配置。
-- `/tmp/omp-container-seed.*`（含 MyTTAPI key）、`/tmp/omp-bin-18.8.6/`、`/tmp/acp-omp-release.*`。
+- 容器测试环境与若干临时目录。
+- 提供商凭据的存放位置不在本文记录，清理时由用户自行处理。
