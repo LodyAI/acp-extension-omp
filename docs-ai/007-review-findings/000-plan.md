@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 已核对 |
+| **状态** | 已实现 |
 | **锚点日期** | 2026-10-10 |
 | **规格核对** | TommyWu 于 2026-10-10 明确要求继续完成独立 review、矩阵、artifact 与集成前置；本计划收敛 review 发现的终态、取消、通知顺序和子进程收尾问题，允许按 TDD 修复后继续验证。 |
 | **相关** | [`AGENTS.md`](../../AGENTS.md)、[`COMPATIBILITY.md`](../../COMPATIBILITY.md)、[`TESTING.md`](../../TESTING.md)、[`src/connection.ts`](../../src/connection.ts)、[`src/server.ts`](../../src/server.ts)、[`test/connection.test.ts`](../../test/connection.test.ts)、[`test/server.test.ts`](../../test/server.test.ts) |

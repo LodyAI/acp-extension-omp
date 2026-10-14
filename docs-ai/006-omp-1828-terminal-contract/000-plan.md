@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 已核对 |
+| **状态** | 已实现 |
 | **锚点日期** | 2026-10-07 |
 | **规格核对** | TommyWu 于 2026-10-07 核对目标、非目标、备选方案、不可逆影响和验收证据，并明确允许按 legacy `agent_end` 方案实现。 |
 | **相关** | [`AGENTS.md`](../../AGENTS.md)、[`COMPATIBILITY.md`](../../COMPATIBILITY.md)、[`TESTING.md`](../../TESTING.md)、[`src/connection.ts`](../../src/connection.ts)、[`test/connection.test.ts`](../../test/connection.test.ts) |
