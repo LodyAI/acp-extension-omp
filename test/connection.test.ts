@@ -29,10 +29,11 @@ type Peer = {
   received: Record<string, unknown>[];
   updates: acp.SessionNotification[];
   usages: SessionUsageUpdate[];
+  failures: Error[];
   setPrompt(handler: (command: Record<string, unknown>) => void): void;
   setAbort(handler: (command: Record<string, unknown>) => void): void;
   setUpdate(handler: (notification: acp.SessionNotification) => Promise<void>): void;
-  setUsage(handler: (usage: SessionUsageUpdate) => void): void;
+  setUsage(handler: (usage: SessionUsageUpdate) => void | Promise<void>): void;
   close(): void;
   exited: Promise<void>;
 };
@@ -100,13 +101,14 @@ function peer(): Peer {
     },
   });
   const usages: SessionUsageUpdate[] = [];
-  let onUsage = (usage: SessionUsageUpdate): void => {
+  let onUsage = (usage: SessionUsageUpdate): void | Promise<void> => {
     usages.push(usage);
   };
+  const failures: Error[] = [];
   const host = {
     update: (notification: acp.SessionNotification) => onUpdate(notification),
     usage: (usage: SessionUsageUpdate) => onUsage(usage),
-    failure: () => {},
+    failure: (error: Error) => { failures.push(error); },
   };
   return {
     connection: new OmpRpcConnection({ readable, writable }, host),
@@ -116,6 +118,7 @@ function peer(): Peer {
     received,
     updates,
     usages,
+    failures,
     setPrompt(handler: (command: Record<string, unknown>) => void) {
       onPrompt = handler;
     },
@@ -125,7 +128,7 @@ function peer(): Peer {
     setUpdate(handler: (notification: acp.SessionNotification) => Promise<void>) {
       onUpdate = handler;
     },
-    setUsage(handler: (usage: SessionUsageUpdate) => void) {
+    setUsage(handler: (usage: SessionUsageUpdate) => void | Promise<void>) {
       onUsage = handler;
     },
     close() {
@@ -458,6 +461,83 @@ describe("OMP RPC connection", () => {
     gate.resolve(undefined);
     await expect(prompt).resolves.toEqual({ stopReason: "end_turn" });
     expect(p.updates).toHaveLength(1);
+  });
+  it.each([
+    ["text-reject", true, false],
+    ["text-reject", false, false],
+    ["usage-reject", true, false],
+    ["usage-reject", false, false],
+    ["text-throw", true, false],
+    ["text-throw", false, false],
+    ["text-reject", true, true],
+    ["usage-reject", true, true],
+  ] as const)("fails promptly after %s (ACK: %s, terminal queued: %s)", async (mode, acknowledge, terminal) => {
+    const p = peer();
+    peers.push(p);
+    const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    const gate = deferred<void>();
+    const started = deferred<void>();
+    const delivered: string[] = [];
+    const failNotification = () => {
+      started.resolve();
+      if (mode === "text-throw") throw "synthetic-private-notification-error";
+      return gate.promise;
+    };
+    p.setUpdate((notification) => {
+      const update = notification.update;
+      if (update.sessionUpdate !== "agent_message_chunk" || update.content.type !== "text") {
+        throw new Error("Expected text notification");
+      }
+      const text = update.content.text;
+      if (text === "fail") return failNotification();
+      delivered.push(text);
+      return Promise.resolve();
+    });
+    p.setUsage(() => {
+      if (mode === "usage-reject") return failNotification();
+      delivered.push("usage");
+    });
+    p.setPrompt((command) => {
+      p.emitBatch([
+        ...(acknowledge ? [{ type: "response", id: command.id, command: "prompt", success: true }] : []),
+        { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "first" } },
+        ...(mode === "usage-reject" ? [] : [
+          { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "fail" } },
+        ]),
+        {
+          type: "message_end",
+          messageId: "usage-1",
+          message: {
+            role: "assistant", provider: "fixture", model: "model",
+            usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+          },
+        },
+        { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "after failure" } },
+        ...(terminal ? [{ type: "prompt_result", id: command.id, status: "completed", sessionSettled: true }] : []),
+      ]);
+    });
+    let outcome = "pending";
+    let rejection: Error | undefined;
+    const prompt = p.connection.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "fail" }] });
+    const observed = prompt.then(
+      () => { outcome = "resolved"; },
+      (error: Error) => { rejection = error; outcome = "rejected"; },
+    );
+    await started.promise;
+    if (mode !== "text-throw") {
+      expect(outcome).toBe("pending");
+      expect(p.failures).toEqual([]);
+      gate.reject(new Error("synthetic-private-notification-error"));
+    }
+    await expect.poll(() => outcome, { timeout: 1_000 }).toBe("rejected");
+    await observed;
+    expect(rejection?.message).not.toContain("synthetic-private");
+    expect(p.failures).toHaveLength(1);
+    expect(p.failures[0]?.message).not.toContain("synthetic-private");
+    expect(delivered).toEqual(["first"]);
+    const commandsBefore = p.received.length;
+    await expect(p.connection.newSession({ cwd: "/work", mcpServers: [] })).rejects.toThrow();
+    expect(p.received).toHaveLength(commandsBefore);
   });
   it("drains notifications enqueued after settlement starts before resolving", async () => {
     const p = peer();

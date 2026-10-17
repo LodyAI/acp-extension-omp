@@ -60,6 +60,9 @@ The adapter launches only `omp --mode rpc`. OMP diagnostics go to stderr; ACP
 and OMP RPC traffic remain separate. Transport failure and child-process exit
 fail the ACP connection rather than synthesizing a successful prompt result.
 
+ACP 文本或用量通知发送失败时，适配器立即关闭 RPC／ACP 连接并回收 OMP，
+不等待 prompt ACK 或 native terminal；缓慢但成功的通知仍按顺序排空。
+
 Closing the ACP connection sends SIGTERM to the OMP process group on POSIX, or
 ends OMP stdin on Windows. After a one-second grace period the adapter
 force-terminates the owned child; on POSIX the whole OMP process group must be
