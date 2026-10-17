@@ -7,14 +7,15 @@ does not bundle OMP, inspect credentials, or persist user session data.
 ## Collaboration status
 
 This is a runnable collaboration branch, not a published Lody provider or an
-OMP compatibility release. Local verification covers OMP 18.3.1 (Node 22.22.3)
-and OMP 18.8.4 (Node 26.10.0 and 22.15.0) on macOS arm64, with real OMP contract
+OMP compatibility release. Local verification covers OMP 18.2.8 (Node 22.22.3, full record in `TESTING.md`),
+OMP 18.3.1 (Node 22.22.3) and OMP 18.8.4 (Node 26.10.0 and 22.15.0) on macOS
+arm64, with real OMP contract
 runs against a loopback-only synthetic model. The 39 synthetic regression tests in `npm run check` do not use OMP and
 are not tied to that evidence row; one stdout-EOF case and eight adapter-process
 cases run only on POSIX and are skipped on Windows. No production
 runtime manifest is changed.
 
-Before release, the 18.2.8/stable-version and OS matrices, independent maintainer
+Before release, the stable-version and OS matrices（包括 18.2.8 在 macOS 以外的系统）, independent maintainer
 review, reproducible runtime archive, public checksum read-back, and Lody
 end-to-end acceptance must pass. These gates are recorded in `TESTING.md` and
 `RELEASE.md`; optional load/resume/usage advertisements remain disabled.
@@ -117,10 +118,9 @@ also accepts an explicit OMP executable:
 npm run contract -- /path/to/installed/dist/index.js /path/to/verified/omp
 ```
 
-Local evidence currently covers OMP 18.3.1 and 18.8.4 on macOS arm64, including
-an independently installed npm tarball. It does not establish the 18.2.8 baseline,
-all supported operating systems, automatic compaction, arbitrary extensions, or
-real-provider quality. See `TESTING.md` for remaining gates.
+本地证据目前覆盖 macOS arm64 上的 OMP 18.2.8、18.3.1 和 18.8.4，包括一个独立安装的
+npm tarball。18.2.8 真实合同已在 macOS arm64 / Node 22.22.3 上通过，其他 OS 目标仍未验证。
+这些证据不证明自动 compaction、任意扩展或真实提供商的质量。剩余关卡见 `TESTING.md`。
 
 Locally handled OMP prompts (`agentInvoked: false`) complete without waiting for
 a terminal frame that will never arrive; `/help` completion is exercised by the

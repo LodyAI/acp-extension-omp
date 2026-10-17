@@ -25,6 +25,7 @@ OMP 18.3.1 继续使用带 `yielded` 的 agent event、terminal `prompt_result` 
 - 环境：Node `22.22.3`、macOS arm64、Core `0.1.8`。
 - 运行方式：隔离临时 HOME/profile `contract`、loopback-only synthetic model、credential-free environment。
 - adapter：工作树基于 `4fd87e3135631bef634230bf2e1c155910e831ee`，测试时包含未提交修改；该 SHA 不是本次精确 tested source 的最终 commit。
+- 更新（2026-10-17）：上述基于 `4fd87e3` 脏工作树的运行已被 `TESTING.md` 中 2026-10-17 在干净提交 `4622df9` 上的 OMP 18.2.8 完整记录取代。
 - 结果：`npm run contract -- dist/index.js /Users/tommywu/.cache/acp-extension-omp/omp-18.2.8-darwin-arm64` fresh-repeat 通过 prompt、cancel、exact load/resume、usage、restart、ordering 和 error cases；对应的 18.3.1 命令也通过。
 
 本轮重新运行门禁：Node `22.22.3` 下 `npm run check` 通过，28/28 tests；`npm run build`、`npm run smoke`（OMP 18.3.1 initialize/new/load）、18.3.1 real contract、`npm pack --dry-run`（15 files）和 `git diff --check` 均通过。首次以 Node `20.19.6` 跑 check 时，server tests 因 `Promise.withResolvers` 不可用失败；切换到项目要求的 Node 22 后完整通过。
