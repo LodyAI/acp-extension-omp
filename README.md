@@ -117,10 +117,11 @@ also accepts an explicit OMP executable:
 npm run contract -- /path/to/installed/dist/index.js /path/to/verified/omp
 ```
 
-Local evidence currently covers OMP 18.3.1 and 18.8.4 on macOS arm64, including
-an independently installed npm tarball. It does not establish the 18.2.8 baseline,
-all supported operating systems, automatic compaction, arbitrary extensions, or
-real-provider quality. See `TESTING.md` for remaining gates.
+Local evidence currently covers OMP 18.2.8, 18.3.1, and 18.8.4 on macOS arm64,
+including an independently installed npm tarball. The 18.2.8 real contract passed
+on macOS arm64 / Node 22.22.3; other OS targets remain unverified. This evidence
+does not establish automatic compaction, arbitrary extensions, or real-provider
+quality. See `TESTING.md` for remaining gates.
 
 Locally handled OMP prompts (`agentInvoked: false`) complete without waiting for
 a terminal frame that will never arrive; `/help` completion is exercised by the
