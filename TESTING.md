@@ -80,13 +80,14 @@ Local evidence, not a release declaration.
 
 ## Remaining gates
 
-OMP 18.2.8 and the stable-version matrix remain unverified. As of 2026-10-09 the
-latest stable OMP release is 18.8.6 and the previous stable is 18.8.5; neither is
-installed here, and agents must not download OMP. 18.8.4 above is neither row. Official release/npm
-sources were found, but direct asset TLS failed, authenticated asset download
-timed out with an incomplete digest, and isolated npm installation timed out.
-The incomplete executable was not run. Required next evidence includes that
-baseline, supported OS targets, and native background/compaction behavior.
+The OMP 18.2.8 baseline real contract passed on macOS arm64 / Node 22.22.3
+with the official `omp-darwin-arm64` asset (size and SHA-256 in
+`COMPATIBILITY.md`); other OS targets for 18.2.8 remain unverified. The
+stable-version matrix remains unverified. As of 2026-10-09 the latest stable OMP
+release is 18.8.6 and the previous stable is 18.8.5; neither is installed here,
+and agents must not download OMP. 18.8.4 above is neither row. Required next
+evidence includes that matrix, supported OS targets, and native
+background/compaction behavior.
 Independent maintainer review, reproducible release packaging, and public
 artifact SHA-256/size read-back are separate gates; npm package smoke is not
 evidence that Lody's managed-runtime download/install pipeline has passed.

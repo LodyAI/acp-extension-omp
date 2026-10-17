@@ -175,3 +175,6 @@
 - [002 — 终止信号时回收 OMP 子进程](002-signal-shutdown/000-plan.md) — 2026-10-09：终止信号时回收 OMP 子进程
 - [003 — 强杀失败后让适配器退出](003-forced-close-failure/000-plan.md) — 2026-10-09：强杀失败后让适配器退出
 - [004 — OMP 首进程退出后的残留进程与管道](004-process-group-stragglers/000-plan.md) — 2026-10-09：OMP 首进程退出后的残留进程与管道
+- [005 — 会话切换失败后的身份失效](005-session-switch-failure/000-plan.md) — 2026-10-07：会话切换失败后的身份失效
+- [006 — OMP 18.2.8 legacy RPC 终态](006-omp-1828-terminal-contract/000-plan.md) — 2026-10-07：OMP 18.2.8 legacy RPC 终态
+- [007 — 审查发现的终态、取消与进程收尾](007-review-findings/000-plan.md) — 2026-10-10：审查发现的终态、取消与进程收尾
