@@ -224,17 +224,11 @@ export class OmpRpcConnection {
     try {
       await this.rpc.request("abort");
       active.abortState = "acknowledged";
-      if (active.terminal) void this.finishPrompt(active, active.terminal);
+      if (active.terminal && active.terminal.sessionSettled !== false) void this.finishPrompt(active, active.terminal);
       else if (active.pendingLegacyCancel) void this.finishPrompt(active, { status: "aborted" });
       await active.done;
     } catch (error) {
-      active.abortState = undefined;
-      if (this.active === active) {
-        void this.finishPrompt(active, {
-          status: "error",
-          error: { message: this.promptError(error).message },
-        });
-      }
+      if (active.abortState === "requested") this.rpc.close();
       throw error;
     } finally {
       if (this.cancellationInFlight === active) this.cancellationInFlight = undefined;
@@ -366,7 +360,7 @@ export class OmpRpcConnection {
       return;
     }
     if (frame.type === "session_settled" && this.active?.terminal) {
-      void this.finishPrompt(this.active, this.active.terminal);
+      void this.finishPrompt(this.active, { ...this.active.terminal, sessionSettled: true });
       return;
     }
     if (frame.type === "message_end" && active) this.accountUsage(frame, active.generation);
