@@ -31,6 +31,7 @@ type Peer = {
   usages: SessionUsageUpdate[];
   setPrompt(handler: (command: Record<string, unknown>) => void): void;
   setAbort(handler: (command: Record<string, unknown>) => void): void;
+  setSessionChange(handler: (command: Record<string, unknown>) => void): void;
   setUpdate(handler: (notification: acp.SessionNotification) => Promise<void>): void;
   setUsage(handler: (usage: SessionUsageUpdate) => void): void;
   close(): void;
@@ -74,6 +75,9 @@ function peer(): Peer {
     if (!prompt) throw new Error("Abort has no active prompt");
     emit({ type: "prompt_result", id: prompt.id, agentInvoked: true, status: "aborted", sessionSettled: true });
   };
+  let onSessionChange = (command: Record<string, unknown>) => {
+    reply(command, { cancelled: false });
+  };
   const writable = new WritableStream<Uint8Array>({
     write(bytes) {
       const command = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
@@ -83,10 +87,8 @@ function peer(): Peer {
           reply(command, state);
           break;
         case "new_session":
-          reply(command, { cancelled: false });
-          break;
         case "switch_session":
-          reply(command, { cancelled: false });
+          onSessionChange(command);
           break;
         case "prompt":
           onPrompt(command);
@@ -121,6 +123,9 @@ function peer(): Peer {
     },
     setAbort(handler: (command: Record<string, unknown>) => void) {
       onAbort = handler;
+    },
+    setSessionChange(handler: (command: Record<string, unknown>) => void) {
+      onSessionChange = handler;
     },
     setUpdate(handler: (notification: acp.SessionNotification) => Promise<void>) {
       onUpdate = handler;
@@ -804,17 +809,80 @@ describe("OMP RPC connection", () => {
       .rejects.toThrow();
     expect(p.received.some((command) => command.type === "switch_session")).toBe(false);
   });
-  it.each(["missing", "empty"] as const)("invalid exact session switch (%s) invalidates the previous ACP identity", async (kind) => {
+  it.each([
+    ["load", "missing"], ["load", "empty"], ["load", "directory"],
+    ["resume", "missing"], ["resume", "empty"], ["resume", "directory"],
+  ] as const)("invalid %s session switch (%s) invalidates the previous ACP identity", async (operation, kind) => {
     const p = peer();
     peers.push(p);
     const previous = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
     const directory = await mkdtemp(join(tmpdir(), "omp-invalid-switch-test-"));
     directories.push(directory);
-    const target = join(directory, `${kind}.jsonl`);
+    const target = kind === "directory" ? directory : join(directory, `${kind}.jsonl`);
     if (kind === "empty") await writeFile(target, "");
-    await expect(p.connection.loadSession({ sessionId: target, cwd: "/work", mcpServers: [] })).rejects.toThrow();
+    const request = { sessionId: target, cwd: "/work", mcpServers: [] };
+    const changed = operation === "load" ? p.connection.loadSession(request) : p.connection.resumeSession(request);
+    await expect(changed).rejects.toThrow();
+    expect(p.received.some((command) => command.type === "switch_session")).toBe(false);
     await expect(p.connection.prompt({ sessionId: previous.sessionId, prompt: [{ type: "text", text: "old identity" }] }))
       .rejects.toThrow("identity");
+    expect(p.received.some((command) => command.type === "prompt")).toBe(false);
+  });
+
+  it.each([
+    ["new", "rejected"], ["new", "cancelled"],
+    ["load", "rejected"], ["load", "cancelled"],
+    ["resume", "rejected"], ["resume", "cancelled"],
+  ] as const)("failed %s session switch (%s) stays closed until a fresh session is verified", async (operation, failure) => {
+    const p = peer();
+    peers.push(p);
+    const previous = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    const directory = await mkdtemp(join(tmpdir(), "omp-failed-switch-test-"));
+    directories.push(directory);
+    const target = join(directory, "replacement.jsonl");
+    await writeFile(target, '{"type":"session"}\n');
+    const started = deferred<Record<string, unknown>>();
+    p.setSessionChange((command) => started.resolve(command));
+    const request = { sessionId: target, cwd: "/work", mcpServers: [] };
+    const changed = operation === "new" ? p.connection.newSession(request)
+      : operation === "load" ? p.connection.loadSession(request) : p.connection.resumeSession(request);
+    const command = await started.promise;
+    const oldPrompt = { sessionId: previous.sessionId, prompt: [{ type: "text" as const, text: "old identity" }] };
+    await expect(p.connection.prompt(oldPrompt)).rejects.toThrow("active");
+    const rejected = expect(changed).rejects.toThrow(failure === "rejected" ? "OMP RPC command failed" : "cancelled");
+    p.emit({
+      type: "response", id: command.id, command: command.type,
+      success: failure !== "rejected", data: { cancelled: true },
+    });
+    await rejected;
+    await expect(p.connection.prompt(oldPrompt)).rejects.toThrow("identity");
+    expect(p.received.some((command) => command.type === "prompt")).toBe(false);
+    p.emitBatch([
+      { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "stale text" } },
+      {
+        type: "message_end", messageId: "stale-message",
+        message: {
+          role: "assistant", provider: "fixture", model: "model",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+        },
+      },
+    ]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(p.updates).toEqual([]);
+    expect(p.usages).toEqual([]);
+
+    p.setSessionChange((next) => p.emit({
+      type: "response", id: next.id, command: next.type, success: true, data: { cancelled: false },
+    }));
+    p.state.sessionFile = target;
+    const fresh = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    expect(fresh.sessionId).toBe(target);
+    await expect(p.connection.prompt(oldPrompt)).rejects.toThrow("identity");
+    await expect(p.connection.prompt({ ...oldPrompt, sessionId: fresh.sessionId })).resolves.toEqual({ stopReason: "end_turn" });
+    expect(p.updates).toEqual([{
+      sessionId: target,
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hello" } },
+    }]);
   });
 
   it.each(["new", "load", "resume"] as const)("refuses session %s while a prompt is active", async (operation) => {
