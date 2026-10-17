@@ -7,7 +7,7 @@ does not bundle OMP, inspect credentials, or persist user session data.
 ## Collaboration status
 
 This is a runnable collaboration branch, not a published Lody provider or an
-OMP compatibility release. Local verification covers OMP 18.2.8 (Node 22.22.3),
+OMP compatibility release. Local verification covers OMP 18.2.8 (Node 22.22.3, full record in `TESTING.md`),
 OMP 18.3.1 (Node 22.22.3) and OMP 18.8.4 (Node 26.10.0 and 22.15.0) on macOS
 arm64, with real OMP contract
 runs against a loopback-only synthetic model. The 39 synthetic regression tests in `npm run check` do not use OMP and
@@ -15,7 +15,7 @@ are not tied to that evidence row; one stdout-EOF case and eight adapter-process
 cases run only on POSIX and are skipped on Windows. No production
 runtime manifest is changed.
 
-Before release, the stable-version and OS matrices (including 18.2.8 off macOS), independent maintainer
+Before release, the stable-version and OS matrices（包括 18.2.8 在 macOS 以外的系统）, independent maintainer
 review, reproducible runtime archive, public checksum read-back, and Lody
 end-to-end acceptance must pass. These gates are recorded in `TESTING.md` and
 `RELEASE.md`; optional load/resume/usage advertisements remain disabled.

@@ -78,6 +78,31 @@ Local evidence, not a release declaration.
   uncompressed tar, but different gzip bytes (18111 bytes), so the release
   toolchain must be recorded with the digest.
 
+### Matrix record: OMP 18.2.8 (2026-10-17)
+
+Local evidence, not a release declaration. Minimum real-contract baseline.
+
+| Field | Value |
+| --- | --- |
+| OMP | 18.2.8, official release asset `omp-darwin-arm64` (cached copy; `--version` reports `omp/18.2.8`) |
+| OMP digest | SHA-256 `cf8d34a7fe6f60de1acbe74f29c82026e4c07888e9d89f7ebceeb922159e5787`, 193484176 bytes |
+| Node | 22.22.3 (npm 10.9.8) |
+| OS | macOS (Darwin 27.2.0) arm64 |
+| Adapter commit | `4622df91ab1a97e9b0b01815f803d016d0c9edd6` (clean worktree, `git status` empty before and after) |
+| Core | `acp-extension-core` 0.1.8 |
+| Test profile | `contract` (smoke: per-run `lody-smoke-<pid>`), temporary HOME, loopback-only model |
+| Entry under test | `dist/index.js` built from the clean worktree after `npm ci` and `npm run check` (69 tests passed) |
+| Result | Pass: `npm run smoke` and `npm run contract` |
+
+- Required cases 1–8 ran against the real executable and passed.
+- Case 9 (child failure) is covered by synthetic tests on Linux, macOS and
+  Windows CI, not by this real-executable row.
+- `scripts/smoke.mjs` invokes `omp` from `PATH` and takes no executable
+  argument, so smoke was run with a temporary `PATH` shim pointing to the cached
+  18.2.8 binary. A first unshimmed run used the system OMP 18.11.3 and is not
+  counted. `npm run contract` received the 18.2.8 path explicitly.
+- Other OS targets for 18.2.8 remain unverified.
+
 ## Remaining gates
 
 The OMP 18.2.8 baseline real contract passed on macOS arm64 / Node 22.22.3
