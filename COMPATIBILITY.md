@@ -33,6 +33,19 @@ the terminal `prompt_result`.
 Session changes exclude prompts; a failed native switch invalidates the previous
 ACP identity. Missing/empty native files fail before any switch request.
 
+消息归属只按可观察证据隔离：在连接生命周期内保留 `message_start`、
+`message_update`、`message_end` 的首次 messageId / message.responseId
+所属 generation；同帧共现的两种 ID 保留相同归属和计费身份。已属旧 generation、
+无当前 prompt 时已观察的 ID，以及明确
+不匹配已知 native sessionId/sessionFile 的帧，不转发为当前 text/usage。
+任意次 new/load/resume 后，当前 prompt 首次出现的 ID 仍正常入账，不要求先有
+message_start，也不会因此关闭 RPC。若旧帧首次出现于新 prompt 中且没有可靠
+session identity，其来源与正常新消息无法区别，仍按当前 prompt 处理；别名关系
+尚未证实时已接收的歧义通知不回溯撤销。无关联的 legacy agent_end/session_settled
+仍依赖上游顺序。本防护不证明真实 OMP
+background/settlement 后绝无旧帧。归属记录随连接内不同消息 ID 数量增长，不做
+会丢失旧归属证据的淘汰。
+
 Release requires the full matrix. A future optional-capability policy must be
 based on proven RPC primitives, not a greater version number. No runtime
 multi-version capability discovery is claimed by this candidate.

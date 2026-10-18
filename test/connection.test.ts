@@ -22,7 +22,7 @@ type Peer = {
   emitBatch(frames: Record<string, unknown>[]): void;
   state: {
     sessionFile: string;
-    sessionId: string;
+    sessionId?: string;
     thinkingLevel: string;
     model: { provider: string; id: string; name: string };
   };
@@ -716,9 +716,11 @@ describe("OMP RPC connection", () => {
     });
     const prompt = p.connection.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "identity" }] });
     await firstUpdateStarted.promise;
-    // The regression needs to model a session switch while the notification tail is blocked.
-    const internals = p.connection as unknown as { sessionId: string };
-    internals.sessionId = "/tmp/omp-next-session.jsonl";
+    await expect(p.connection.newSession({ cwd: "/work", mcpServers: [] })).rejects.toThrow("active");
+    await expect(p.connection.loadSession({ sessionId: session.sessionId, cwd: "/work", mcpServers: [] }))
+      .rejects.toThrow("active");
+    await expect(p.connection.resumeSession({ sessionId: session.sessionId, cwd: "/work", mcpServers: [] }))
+      .rejects.toThrow("active");
     gate.resolve(undefined);
     await expect(prompt).resolves.toEqual({ stopReason: "end_turn" });
     expect(p.updates).toHaveLength(2);
@@ -815,6 +817,264 @@ describe("OMP RPC connection", () => {
     });
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(p.usages).toHaveLength(0);
+  });
+
+  it.each(["message_start", "message_update", "message_end", "idle", "wrong-session"] as const)(
+    "ignores proven stale %s messages while a replacement prompt is active",
+    async (origin) => {
+      const p = peer();
+      peers.push(p);
+      const first = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+      const old = {
+        messageId: "old-generation",
+        message: {
+          role: "assistant", provider: "fixture", model: "old-model",
+          usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 },
+        },
+      };
+      p.setPrompt((command) => {
+        p.emitBatch([
+          { type: "response", id: command.id, command: "prompt", success: true },
+          ...(origin.startsWith("message_") ? [{
+            ...old, type: origin,
+            assistantMessageEvent: { type: "text_delta", delta: "original" },
+          }] : []),
+          { type: "prompt_result", id: command.id, status: "completed", sessionSettled: true },
+        ]);
+      });
+      await p.connection.prompt({ sessionId: first.sessionId, prompt: [{ type: "text", text: "first" }] });
+      p.state.sessionFile = "/tmp/replacement-generation.jsonl";
+      p.state.sessionId = "replacement-native-id";
+      const current = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+      if (origin === "idle") {
+        p.emit({ ...old, type: "message_start" });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      const updateCount = p.updates.length;
+      const usageCount = p.usages.length;
+      p.setPrompt((command) => {
+        const identity = origin === "wrong-session" ? { sessionId: "native-omp-session" } : {};
+        p.emitBatch([
+          { type: "response", id: command.id, command: "prompt", success: true },
+          { ...old, ...identity, type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "STALE" } },
+          { ...old, ...identity, type: "message_end" },
+          { type: "message_update", messageId: "fresh-current", sessionId: "replacement-native-id",
+            assistantMessageEvent: { type: "text_delta", delta: "CURRENT" } },
+          { type: "message_end", messageId: "fresh-current", sessionId: "replacement-native-id",
+            message: { ...old.message, model: "current-model", usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0 } } },
+          { type: "prompt_result", id: command.id, status: "completed", sessionSettled: true },
+        ]);
+      });
+      await expect(p.connection.prompt({ sessionId: current.sessionId, prompt: [{ type: "text", text: "current" }] }))
+        .resolves.toEqual({ stopReason: "end_turn" });
+      expect(p.updates.slice(updateCount)).toEqual([{
+        sessionId: current.sessionId,
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "CURRENT" } },
+      }]);
+      expect(p.usages.slice(usageCount)).toHaveLength(1);
+      expect(Object.keys(p.usages.at(-1)?.modelUsage ?? {})).toEqual(["fixture/current-model"]);
+      expect(p.usages.at(-1)?.modelUsage).toMatchObject({
+        "fixture/current-model": { inputTokens: 3, outputTokens: 2, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+      });
+    },
+  );
+
+  it.each(["current", "legacy"] as const)("accounts fresh %s usage through repeated new/load/resume generations", async (protocol) => {
+    const p = peer();
+    peers.push(p);
+    const directory = await mkdtemp(join(tmpdir(), "omp-generations-"));
+    directories.push(directory);
+    const target = join(directory, "native.jsonl");
+    await writeFile(target, '{"type":"session"}\n');
+    p.state.sessionFile = target;
+    const scopes = new Set<string>();
+    for (const [index, operation] of ["new", "load", "resume", "new", "load", "resume"].entries()) {
+      const request = { cwd: directory, mcpServers: [], sessionId: target };
+      if (operation === "new") await p.connection.newSession(request);
+      else if (operation === "load") await p.connection.loadSession(request);
+      else await p.connection.resumeSession(request);
+      p.setPrompt((command) => {
+        const id = `fresh-${index}`;
+        const message = {
+          role: "assistant", provider: "fixture", model: "model",
+          ...(protocol === "legacy" ? { responseId: id } : {}),
+          usage: { input: 4, output: 2, cacheRead: 0, cacheWrite: 0 },
+        };
+        const frame = { type: "message_end", ...(protocol === "current" ? { messageId: id } : {}), message };
+        p.emitBatch([
+          { type: "response", id: command.id, command: "prompt", success: true },
+          frame, frame,
+          { ...frame, message: { ...message, usage: { ...message.usage, output: 3 } } },
+          { type: "prompt_result", id: command.id, status: "completed", sessionSettled: true },
+        ]);
+      });
+      await expect(p.connection.prompt({ sessionId: target, prompt: [{ type: "text", text: "usage" }] }))
+        .resolves.toEqual({ stopReason: "end_turn" });
+      expect(p.usages).toHaveLength((index + 1) * 2);
+      expect(p.usages.at(-1)?.modelUsage?.["fixture/model"]).toMatchObject({ inputTokens: 4, outputTokens: 3 });
+      expect(p.usages.at(-1)?.modelUsage?.["fixture/model"]?.costUSD).toBeUndefined();
+      const scope = p.usages.at(-1)?._meta?.lody?.usageScopeId;
+      expect(scope).toBeDefined();
+      expect(scopes.has(scope!)).toBe(false);
+      scopes.add(scope!);
+    }
+  });
+
+  it.each(["current", "legacy"] as const)("ignores old %s message IDs after cancellation and a session switch", async (protocol) => {
+    const p = peer();
+    peers.push(p);
+    const first = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    const message = {
+      role: "assistant", provider: "fixture", model: "old-model",
+      ...(protocol === "legacy" ? { responseId: "cancelled-message" } : {}),
+      usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 },
+    };
+    const identity = protocol === "current" ? { messageId: "cancelled-message" } : {};
+    const started = deferred<void>();
+    p.setPrompt((command) => {
+      p.emitBatch([
+        { type: "response", id: command.id, command: "prompt", success: true },
+        { type: "message_start", ...identity, message },
+      ]);
+      started.resolve(undefined);
+    });
+    const pending = p.connection.prompt({ sessionId: first.sessionId, prompt: [{ type: "text", text: "cancel" }] });
+    await started.promise;
+    await p.connection.cancel({ sessionId: first.sessionId });
+    await expect(pending).resolves.toEqual({ stopReason: "cancelled" });
+    p.state.sessionFile = "/tmp/after-cancel.jsonl";
+    const current = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    p.setPrompt((command) => {
+      p.emitBatch([
+        { type: "response", id: command.id, command: "prompt", success: true },
+        { type: "message_end", ...identity, message },
+        { type: "prompt_result", id: command.id, sessionId: "wrong-native",
+          status: "error", sessionSettled: true },
+        { type: "message_end", messageId: "after-cancel-current", message: {
+          ...message, responseId: "after-cancel-response", model: "current-model",
+          usage: { input: 2, output: 1, cacheRead: 0, cacheWrite: 0 },
+        } },
+        { type: "prompt_result", id: command.id, status: "completed", sessionSettled: true },
+      ]);
+    });
+    await expect(p.connection.prompt({ sessionId: current.sessionId, prompt: [{ type: "text", text: "after" }] }))
+      .resolves.toEqual({ stopReason: "end_turn" });
+    expect(p.usages).toHaveLength(1);
+    expect(Object.keys(p.usages[0]?.modelUsage ?? {})).toEqual(["fixture/current-model"]);
+    expect(p.usages[0]?.modelUsage?.["fixture/current-model"]).toMatchObject({ inputTokens: 2, outputTokens: 1 });
+  });
+
+  it.each(["dual-to-legacy", "legacy-to-dual", "preseen-top", "preseen-response"] as const)("retains old responseId provenance across %s representations", async (representation) => {
+    const p = peer();
+    peers.push(p);
+    const message = {
+      role: "assistant", provider: "fixture", model: "old-model", responseId: "old-response",
+      usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 },
+    };
+    const first = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    p.setPrompt((command) => p.emitBatch([
+      { type: "response", id: command.id, command: "prompt", success: true },
+      { type: "message_start", ...(representation === "dual-to-legacy" || representation === "preseen-response"
+        ? { messageId: "old-top" } : {}), message: representation === "preseen-response" ? { role: "assistant" } : message },
+      { type: "prompt_result", id: command.id, status: "completed", sessionSettled: true },
+    ]));
+    await p.connection.prompt({ sessionId: first.sessionId, prompt: [{ type: "text", text: "first" }] });
+    const current = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    p.setPrompt((command) => p.emitBatch([
+      { type: "response", id: command.id, command: "prompt", success: true },
+      ...(representation === "preseen-top" ? [{ type: "message_start", messageId: "late-top" }] : []),
+      ...(representation === "preseen-response" ? [{ type: "message_start", message: { responseId: "old-response" } }] : []),
+      { type: "message_end", ...(representation !== "dual-to-legacy" ? {
+        messageId: representation === "preseen-response" ? "old-top" : "late-top",
+      } : {}), message },
+      ...(representation === "preseen-top" ? [{ type: "message_end", messageId: "late-top", message: { ...message, responseId: undefined } }] : []),
+      ...(representation === "preseen-response" ? [{ type: "message_end", message }] : []),
+      { type: "message_end", messageId: "fresh-top", message: { ...message, responseId: "fresh-response", model: "current-model",
+        usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0 } } },
+      { type: "message_end", message: { ...message, responseId: "fresh-response", model: "current-model",
+        usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0 } } },
+      { type: "prompt_result", id: command.id, status: "completed", sessionSettled: true },
+    ]));
+    await expect(p.connection.prompt({ sessionId: current.sessionId, prompt: [{ type: "text", text: "current" }] }))
+      .resolves.toEqual({ stopReason: "end_turn" });
+    expect(p.usages).toHaveLength(2);
+    expect(Object.keys(p.usages.at(-1)?.modelUsage ?? {})).toEqual(["fixture/current-model"]);
+    expect(p.usages.at(-1)?.modelUsage?.["fixture/current-model"]).toMatchObject({ inputTokens: 3, outputTokens: 2 });
+  });
+
+  it.each(["top-first", "response-first", "top-accounted", "response-accounted"] as const)("merges separately observed aliases without double accounting (%s)", async (order) => {
+    const p = peer();
+    peers.push(p);
+    const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    const top = { type: "message_start", messageId: "separate-top" };
+    const legacy = { type: "message_start", message: { responseId: "separate-response" } };
+    const message = { role: "assistant", provider: "fixture", model: "model", responseId: "separate-response",
+      usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0 } };
+    p.setPrompt((command) => p.emitBatch([
+      { type: "response", id: command.id, command: "prompt", success: true },
+      ...(order.startsWith("top") ? [top, legacy] : [legacy, top]),
+      ...(order === "top-accounted" ? [{ type: "message_end", messageId: "separate-top", message: { ...message, responseId: undefined } }] : []),
+      ...(order === "response-accounted" ? [{ type: "message_end", message }] : []),
+      { type: "message_end", messageId: "separate-top", message },
+      { type: "message_end", message },
+      { type: "message_end", message: { ...message, usage: { ...message.usage, output: 2 } } },
+      { type: "prompt_result", id: command.id, status: "completed", sessionSettled: true },
+    ]));
+    await p.connection.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "aliases" }] });
+    expect(p.usages).toHaveLength(2);
+    expect(p.usages.at(-1)?.modelUsage?.["fixture/model"]).toMatchObject({ inputTokens: 3, outputTokens: 2 });
+  });
+
+  it.each(["initially", "after-switch"] as const)("accounts fresh usage with native sessionId absent %s", async (absence) => {
+    const p = peer();
+    peers.push(p);
+    if (absence === "initially") delete p.state.sessionId;
+    const first = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    p.setPrompt((command) => p.emitBatch([
+      { type: "response", id: command.id, command: "prompt", success: true },
+      { type: "message_start", messageId: "known-old-without-native" },
+      { type: "prompt_result", id: command.id, status: "completed", sessionSettled: true },
+    ]));
+    await p.connection.prompt({ sessionId: first.sessionId, prompt: [{ type: "text", text: "old" }] });
+    delete p.state.sessionId;
+    const current = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    const message = { role: "assistant", provider: "fixture", model: "model",
+      usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0 } };
+    p.setPrompt((command) => p.emitBatch([
+      { type: "response", id: command.id, command: "prompt", success: true },
+      { type: "message_end", messageId: "known-old-without-native", message },
+      { type: "message_end", sessionId: "unverifiable-native-id", messageId: "fresh-without-native", message },
+      { type: "prompt_result", id: command.id, status: "completed", sessionSettled: true },
+    ]));
+    await expect(p.connection.prompt({ sessionId: current.sessionId, prompt: [{ type: "text", text: "current" }] }))
+      .resolves.toEqual({ stopReason: "end_turn" });
+    expect(p.usages).toHaveLength(1);
+    expect(p.usages[0]?.modelUsage?.["fixture/model"]).toMatchObject({ inputTokens: 3, outputTokens: 2 });
+  });
+
+  it.each(["messageId", "responseId"] as const)("does not confuse an old %s with an unassociated fresh ID in the other namespace", async (oldKind) => {
+    const p = peer();
+    peers.push(p);
+    const first = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    p.setPrompt((command) => p.emitBatch([
+      { type: "response", id: command.id, command: "prompt", success: true },
+      { type: "message_start", ...(oldKind === "messageId" ? { messageId: "same-string" } : { message: { responseId: "same-string" } }) },
+      { type: "prompt_result", id: command.id, status: "completed", sessionSettled: true },
+    ]));
+    await p.connection.prompt({ sessionId: first.sessionId, prompt: [{ type: "text", text: "old" }] });
+    const current = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    const message = { role: "assistant", provider: "fixture", model: "model",
+      ...(oldKind === "messageId" ? { responseId: "same-string" } : {}),
+      usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0 } };
+    p.setPrompt((command) => p.emitBatch([
+      { type: "response", id: command.id, command: "prompt", success: true },
+      { type: "message_end", ...(oldKind === "responseId" ? { messageId: "same-string" } : {}), message },
+      { type: "prompt_result", id: command.id, status: "completed", sessionSettled: true },
+    ]));
+    await expect(p.connection.prompt({ sessionId: current.sessionId, prompt: [{ type: "text", text: "fresh" }] }))
+      .resolves.toEqual({ stopReason: "end_turn" });
+    expect(p.usages).toHaveLength(1);
+    expect(p.usages[0]?.modelUsage?.["fixture/model"]).toMatchObject({ inputTokens: 3, outputTokens: 2 });
   });
 
   it("waits for OMP's terminal abort before completing cancellation", async () => {

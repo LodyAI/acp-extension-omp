@@ -33,6 +33,13 @@ type ActivePrompt = {
   commandFailure?: Error;
 };
 
+type MessageOrigin = {
+  generation: number;
+  usageId: string;
+  accounted: boolean;
+  ids: string[];
+};
+
 const legacyStopReasons = new Set([
   "stop",
   "length",
@@ -123,7 +130,9 @@ function promptText(blocks: acp.ContentBlock[]): string {
 export class OmpRpcConnection {
   private readonly rpc: OmpRpcTransport;
   private sessionId = "";
+  private nativeSessionId = "";
   private sessionGeneration = 0;
+  private readonly messageGenerations = new Map<string, MessageOrigin>();
   private active: ActivePrompt | undefined;
   private cancellationInFlight: ActivePrompt | undefined;
   private sessionChanging = false;
@@ -264,6 +273,7 @@ export class OmpRpcConnection {
     if (!state.sessionFile) throw new Error("OMP did not provide a persistent native session");
     if (expectedSession && state.sessionFile !== expectedSession) throw new Error("OMP selected a different session");
     this.sessionId = state.sessionFile;
+    this.nativeSessionId = state.sessionId ?? "";
     this.sessionGeneration += 1;
     this.usage = new SessionUsageAccumulator();
     const configOptions: acp.SessionConfigOption[] = state.model
@@ -286,6 +296,14 @@ export class OmpRpcConnection {
   }
 
   private event(frame: Record<string, unknown>): void {
+    const wrongSession =
+      typeof frame.sessionId === "string" &&
+      !!this.nativeSessionId &&
+      frame.sessionId !== this.nativeSessionId &&
+      frame.sessionId !== this.sessionId;
+    if (frame.type === "message_start" || frame.type === "message_update" || frame.type === "message_end") {
+      if (!this.acceptMessage(frame, wrongSession)) return;
+    } else if (wrongSession) return;
     const active = this.active;
     if (frame.type === "agent_end" && active) {
       if (active.commandFailure) return;
@@ -367,8 +385,51 @@ export class OmpRpcConnection {
       void this.finishPrompt(this.active, { ...this.active.terminal, sessionSettled: true });
       return;
     }
-    if (frame.type === "message_end" && active) this.accountUsage(frame, active.generation);
+    if (frame.type === "message_end" && active) this.accountUsage(frame);
     if (frame.type === "message_update") this.forwardMessage(frame);
+  }
+
+  private acceptMessage(frame: Record<string, unknown>, wrongSession: boolean): boolean {
+    const active = this.active;
+    const generation =
+      active && this.sessionId && !this.sessionChanging && !wrongSession
+        ? active.generation
+        : 0;
+    const message = frame.message;
+    const responseIdValue =
+      message !== null && typeof message === "object"
+        ? (message as Record<string, unknown>).responseId
+        : undefined;
+    const responseId = typeof responseIdValue === "string" && responseIdValue ? `response:${responseIdValue}` : undefined;
+    const messageId = typeof frame.messageId === "string" && frame.messageId ? `message:${frame.messageId}` : undefined;
+    const messageOrigin = messageId ? this.messageGenerations.get(messageId) : undefined;
+    const responseOrigin = responseId ? this.messageGenerations.get(responseId) : undefined;
+    if (messageId || responseId) {
+      // Co-observed aliases carry the oldest evidence, even if both were seen separately.
+      let origin = messageOrigin ?? responseOrigin;
+      if (messageOrigin && responseOrigin && messageOrigin !== responseOrigin) {
+        const keepResponse =
+          responseOrigin.generation < messageOrigin.generation ||
+          (responseOrigin.generation === messageOrigin.generation && responseOrigin.accounted && !messageOrigin.accounted);
+        origin = keepResponse ? responseOrigin : messageOrigin;
+        const other = keepResponse ? messageOrigin : responseOrigin;
+        for (const id of other.ids) {
+          this.messageGenerations.set(id, origin);
+          origin.ids.push(id);
+        }
+      }
+      origin ??= { generation, usageId: messageId ?? responseId!, accounted: false, ids: [] };
+      if (messageId && !messageOrigin) {
+        this.messageGenerations.set(messageId, origin);
+        origin.ids.push(messageId);
+      }
+      if (responseId && !responseOrigin && responseId !== messageId) {
+        this.messageGenerations.set(responseId, origin);
+        origin.ids.push(responseId);
+      }
+      if (origin.generation !== generation) return false;
+    }
+    return generation !== 0;
   }
 
   private forwardMessage(frame: Record<string, unknown>): void {
@@ -387,20 +448,24 @@ export class OmpRpcConnection {
     );
   }
 
-  private accountUsage(frame: Record<string, unknown>, generation: number): void {
+  private accountUsage(frame: Record<string, unknown>): void {
     const sessionId = this.sessionId;
-    if (!sessionId || generation !== this.sessionGeneration) return;
     const parsed = assistantUsageFrameSchema.safeParse(frame);
     let message: z.infer<typeof assistantMessageSchema>;
     let messageId: string;
     if (parsed.success) {
       message = parsed.data.message;
-      messageId = parsed.data.messageId;
+      messageId = `message:${parsed.data.messageId}`;
     } else {
       const legacyParsed = legacyAssistantUsageFrameSchema.safeParse(frame);
       if (!legacyParsed.success) return;
       message = legacyParsed.data.message;
-      messageId = legacyParsed.data.message.responseId;
+      messageId = `response:${legacyParsed.data.message.responseId}`;
+    }
+    const origin = this.messageGenerations.get(messageId);
+    if (origin) {
+      origin.accounted = true;
+      messageId = origin.usageId;
     }
     const row = {
       inputTokens: message.usage.input,
