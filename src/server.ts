@@ -273,7 +273,8 @@ export function serve(stream: Stream, options: ServeOptions) {
         agentInfo: { name: "omp-rpc", version: packageJson.version },
         agentCapabilities: {
           promptCapabilities: { image: false, embeddedContext: false },
-          // Optional capabilities stay unadvertised until the baseline matrix and review pass.
+          // loadSession stays omitted: load must replay history before its response.
+          sessionCapabilities: { resume: {} },
         },
         authMethods: [],
       }),

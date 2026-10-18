@@ -16,9 +16,10 @@ Status: repository candidate; no production OMP version is declared supported ye
 ## Runtime and release policy
 
 Version strings record evidence; they do not prove protocol compatibility.
-The candidate withholds optional load/resume/usage capability advertisements
-until the baseline matrix and independent review pass. Explicit contract-runner
-calls still exercise those implementation paths.
+`session/resume` is advertised from the exact native switch and does not replay
+history. Load and usage remain unadvertised. This is not a production version
+declaration. Explicit contract-runner calls still exercise those unadvertised
+implementation paths.
 
 Current terminal `prompt_result` frames must supply a recognized status and
 boolean `sessionSettled`. A yielded result with `sessionSettled: false` does not
