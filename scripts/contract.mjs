@@ -6,7 +6,7 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve, sep } from "node:path";
 
 // Real OMP, synthetic model only: no user profile, credentials, or external endpoint.
 const entry = resolve(process.argv[2] ?? "dist/index.js");
@@ -376,7 +376,10 @@ try {
   const first = start();
   await initialized(first);
   const session = await first.request("session/new", sessionParams);
-  assert.ok(session.sessionId.startsWith(home), "Native session must stay in isolated home");
+  assert.ok(
+    typeof session.sessionId === "string" && resolve(session.sessionId).startsWith(`${resolve(home)}${sep}`),
+    "Native session must stay in isolated home"
+  );
   await access(session.sessionId);
   assert.equal((await first.request("session/prompt", promptParams(session.sessionId))).stopReason, "end_turn");
   assert.ok(requestCount > 0, "Actual OMP must call the loopback model");
@@ -433,7 +436,10 @@ try {
       await assert.rejects(resumed.request("session/prompt", promptParams(target)), "Failed load/resume cannot create an empty fallback");
       assert.equal(requestCount, before, "Rejected identities must not reach the model");
       const recovered = await resumed.request("session/new", sessionParams);
-      assert.ok(recovered.sessionId.startsWith(home));
+      assert.ok(
+        typeof recovered.sessionId === "string" && resolve(recovered.sessionId).startsWith(`${resolve(home)}${sep}`),
+        "Native session must stay in isolated home"
+      );
       await resumed.request("session/resume", { ...sessionParams, sessionId: session.sessionId });
     }
   }

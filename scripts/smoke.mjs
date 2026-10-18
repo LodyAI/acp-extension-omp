@@ -3,7 +3,7 @@ import { access, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } fr
 import { spawn, spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve, sep } from "node:path";
 
 const entry = resolve(process.argv[2] ?? "dist/index.js");
 await access(entry);
@@ -155,7 +155,10 @@ try {
     "session/new",
     request("session/new", { cwd: workdir, mcpServers: [] })
   );
-  assert.ok(session.sessionId?.startsWith(home), "Persistent native session must stay in isolated home");
+  assert.ok(
+    typeof session.sessionId === "string" && resolve(session.sessionId).startsWith(`${resolve(home)}${sep}`),
+    "Persistent native session must stay in isolated home"
+  );
   await access(session.sessionId);
   await withTimeout(
     "session/load",
