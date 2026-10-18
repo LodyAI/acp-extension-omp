@@ -178,3 +178,4 @@
 - [005 — 会话切换失败后的身份失效](005-session-switch-failure/000-plan.md) — 2026-10-07：会话切换失败后的身份失效
 - [006 — OMP 18.2.8 legacy RPC 终态](006-omp-1828-terminal-contract/000-plan.md) — 2026-10-07：OMP 18.2.8 legacy RPC 终态
 - [007 — 审查发现的终态、取消与进程收尾](007-review-findings/000-plan.md) — 2026-10-10：审查发现的终态、取消与进程收尾
+- [009 — 迟到事件归属与会话准备](009-late-event-generation/000-plan.md) — 2026-10-18：按可证明消息来源隔离迟到帧，补准备失败与并发证据
