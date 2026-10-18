@@ -33,6 +33,37 @@ Node version, operating system, adapter commit, Core version, test profile name
 (non-secret), and pass/fail result. Do not record environment dumps, tokens,
 headers, cookies, model prompts, or raw provider responses.
 
+## CI 与手动 contract 门禁
+
+- `.github/workflows/ci.yml` 在 Ubuntu、Windows、macOS × Node 22.14.0／23.6.0
+  上执行 `npm ci`、`npm run check`、`npm run build`、`npm pack --dry-run`，
+  以及 `node scripts/verify-package.mjs`，打包检查没有 Windows skip。
+- helper 在同一 Node/npm 工具链下执行两次真实 `npm pack`；每次 `prepack` 都删除
+  `dist/` 后重新编译。它比较按相对路径排序的每个 dist 文件的 SHA-256，以及完整
+  `.tgz` 字节的 SHA-256，任一不同都非零退出；日志记录工具链、摘要和归档大小。
+  这是同一矩阵行内的可复现性检查，不要求不同 OS／工具链的 gzip 字节一致。
+- helper 将归档安装到含空格路径的独立临时项目，只安装生产依赖并禁用安装脚本；
+  执行安装后 npm bin 的 `--help`，通过 ACP `initialize` 响应断言包版本，再关闭 stdin。
+  当前入口不解析 CLI help/version；这里验证实际 ACP 启动和版本，不宣称实现帮助输出，
+  也不需要 OMP。临时项目和两个归档在退出时清理。
+- Windows 仍跳过 `test/signal.test.ts` 的 POSIX 进程／信号套件，以及
+  `test/server.test.ts` 的 live-child stdout EOF 用例。其余合成测试执行；部分 Windows
+  child 测试通过注入 Node runner 启动夹具，不证明真实 Windows OMP 启动或进程树回收。
+
+真实 contract 保持 **manual/gated**，不是普通 PR job，也不以合成 CI 代替。
+`scripts/contract.mjs` 的本地模型端点无需 secrets，但仓库尚无维护者批准、预装且
+校验 OMP 的受控 runner；不得为填补此前置条件在 CI 下载 OMP，或让不可信 PR 使用
+自托管 runner。维护者应在无用户凭据的一次性账户／环境中，先构建并安装候选 tarball，
+再执行 `node scripts/contract.mjs /absolute/installed/dist/index.js /absolute/path/to/omp`。
+PR #12（`test/contract-hardening`）落地后，`scripts/smoke.mjs` 与
+`scripts/contract.mjs` 在 runner 内部 profile 隔离之后才执行 `omp --version`，
+并使用与适配器相同的隔离 env、cwd 和 PATH。在那之前，探测发生在隔离之前并继承
+调用方 env／cwd，因此外层环境也必须隔离。
+每行证据按 Required test record 记录；未完成的 Required cases 和平台限制仍阻断
+对应发布验收，不能因现有 runner 退出成功就视为全部通过。发布必须引用同一候选
+revision 的全部六行 CI 结果及经维护者核对的真实矩阵记录；CI 不会自动发布，也不会
+自动设置分支保护／required checks。正式发布工具链与公开字节回读仍按 `RELEASE.md`。
+
 ## Local evidence
 
 - Node 22.22.3, macOS arm64, Core 0.1.8, installed OMP 18.3.1.
