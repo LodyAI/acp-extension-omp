@@ -29,6 +29,7 @@ type Peer = {
   received: Record<string, unknown>[];
   updates: acp.SessionNotification[];
   usages: SessionUsageUpdate[];
+  failures: Error[];
   setPrompt(handler: (command: Record<string, unknown>) => void): void;
   setAbort(handler: (command: Record<string, unknown>) => void): void;
   setSessionChange(handler: (command: Record<string, unknown>) => void): void;
@@ -105,10 +106,11 @@ function peer(): Peer {
   let onUsage = (usage: SessionUsageUpdate): void => {
     usages.push(usage);
   };
+  const failures: Error[] = [];
   const host = {
     update: (notification: acp.SessionNotification) => onUpdate(notification),
     usage: (usage: SessionUsageUpdate) => onUsage(usage),
-    failure: () => {},
+    failure: (error: Error) => { failures.push(error); },
   };
   return {
     connection: new OmpRpcConnection({ readable, writable }, host),
@@ -118,6 +120,7 @@ function peer(): Peer {
     received,
     updates,
     usages,
+    failures,
     setPrompt(handler: (command: Record<string, unknown>) => void) {
       onPrompt = handler;
     },
@@ -781,6 +784,201 @@ describe("OMP RPC connection", () => {
     await expect(prompt).resolves.toEqual({ stopReason: "cancelled" });
     await expect(p.connection.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "after ack" }] }))
       .resolves.toEqual({ stopReason: "end_turn" });
+  });
+
+  describe.each([
+    { status: "completed", stopReason: "end_turn", cancelResult: "done" },
+    { status: "aborted", stopReason: "cancelled", cancelResult: "done" },
+    { status: "error", stopReason: "error", cancelResult: "error" },
+  ])("late cancel after $status settlement", ({ status, stopReason, cancelResult }) => {
+    it.each(["prompt_result", "session_settled"] as const)(
+      "skips abort after native settlement via %s while notifications drain",
+      async (settlement) => {
+        const p = peer();
+        peers.push(p);
+        const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+        const updateStarted = deferred<void>();
+        const drain = deferred<void>();
+        const order: string[] = [];
+        p.setUpdate(async () => {
+          updateStarted.resolve(undefined);
+          await drain.promise;
+          order.push("update");
+        });
+        p.setPrompt((command) => {
+          p.emitBatch([
+            { type: "response", id: command.id, command: "prompt", success: true },
+            { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "last" } },
+            { type: "prompt_result", id: command.id, status, sessionSettled: settlement === "prompt_result" },
+            ...(settlement === "session_settled" ? [{ type: "session_settled" }] : []),
+          ]);
+        });
+        p.setAbort((command) => {
+          p.emit({ type: "response", id: command.id, command: "abort", success: false, error: "Already settled" });
+        });
+        const request = { sessionId: session.sessionId, prompt: [{ type: "text" as const, text: "late cancel" }] };
+        const prompt = p.connection.prompt(request).then(
+          (result) => { order.push("prompt"); return result.stopReason; },
+          () => { order.push("prompt"); return "error"; },
+        );
+        await updateStarted.promise;
+        const cancellation = p.connection.cancel({ sessionId: session.sessionId }).then(
+          () => { order.push("cancel"); return "done"; },
+          () => { order.push("cancel"); return "error"; },
+        );
+        try {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(p.received.filter((command) => command.type === "abort")).toEqual([]);
+          expect(order).toEqual([]);
+          await expect(p.connection.prompt(request)).rejects.toThrow("active");
+          await expect(p.connection.newSession({ cwd: "/work", mcpServers: [] })).rejects.toThrow("active");
+        } finally {
+          drain.resolve(undefined);
+        }
+        await expect(prompt).resolves.toBe(stopReason);
+        await expect(cancellation).resolves.toBe(cancelResult);
+        expect(order).toEqual(["update", "prompt", "cancel"]);
+        expect(p.failures).toEqual([]);
+        await expect(p.connection.newSession({ cwd: "/work", mcpServers: [] })).resolves.toHaveProperty("sessionId");
+      },
+    );
+  });
+
+  describe.each(["completed", "aborted", "error"] as const)("cancel settlement for %s", (status) => {
+    it.each(["before cancel", "before ACK", "after ACK", "settled before ACK"] as const)(
+      "waits for native settlement and notification drain with terminal %s",
+      async (timing) => {
+        const p = peer();
+        peers.push(p);
+        const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+        const promptStarted = deferred<Record<string, unknown>>();
+        const abortStarted = deferred<Record<string, unknown>>();
+        p.setPrompt((command) => {
+          p.emit({ type: "response", id: command.id, command: "prompt", success: true });
+          promptStarted.resolve(command);
+        });
+        p.setAbort((command) => { abortStarted.resolve(command); });
+        const request = { sessionId: session.sessionId, prompt: [{ type: "text" as const, text: "wait" }] };
+        const order: string[] = [];
+        const prompt = p.connection.prompt(request).then(
+          (result) => { order.push("prompt"); return result.stopReason; },
+          () => { order.push("prompt"); return "error"; },
+        );
+        const command = await promptStarted.promise;
+        const terminal = { type: "prompt_result", id: command.id, status, sessionSettled: false };
+        if (timing === "before cancel") {
+          p.emit(terminal);
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        const cancellation = p.connection.cancel({ sessionId: session.sessionId }).then(
+          () => { order.push("cancel"); return "done"; },
+          () => { order.push("cancel"); return "error"; },
+        );
+        const abort = await abortStarted.promise;
+        if (timing !== "before cancel" && timing !== "after ACK") p.emit(terminal);
+        if (timing === "settled before ACK") {
+          p.emit({ type: "session_settled" });
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(order).toEqual([]);
+        }
+        p.emit({ type: "response", id: abort.id, command: "abort", success: true });
+        if (timing === "after ACK") {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          p.emit(terminal);
+        }
+        if (timing !== "settled before ACK") {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(order).toEqual([]);
+          const sent = p.received.length;
+          await expect(p.connection.prompt(request)).rejects.toThrow("active");
+          const switchRequest = { sessionId: session.sessionId, cwd: "/work", mcpServers: [] };
+          await expect(p.connection.newSession(switchRequest)).rejects.toThrow("active");
+          await expect(p.connection.loadSession(switchRequest)).rejects.toThrow("active");
+          await expect(p.connection.resumeSession(switchRequest)).rejects.toThrow("active");
+          expect(p.received).toHaveLength(sent);
+          const updateStarted = deferred<void>();
+          const drain = deferred<void>();
+          p.setUpdate(async () => {
+            updateStarted.resolve(undefined);
+            await drain.promise;
+            order.push("update");
+          });
+          p.setUsage(() => { order.push("usage"); });
+          p.emitBatch([
+            { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "last" } },
+            {
+              type: "message_end",
+              messageId: "last",
+              message: {
+                role: "assistant", provider: "fixture", model: "model",
+                usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+              },
+            },
+            { type: "session_settled" },
+          ]);
+          await updateStarted.promise;
+          await expect(p.connection.prompt(request)).rejects.toThrow("active");
+          expect(order).toEqual([]);
+          drain.resolve(undefined);
+        }
+        await expect(prompt).resolves.toBe(status === "completed" ? "end_turn" : status === "aborted" ? "cancelled" : "error");
+        await expect(cancellation).resolves.toBe(status === "error" ? "error" : "done");
+        expect(order).toEqual(timing === "settled before ACK" ? ["prompt", "cancel"] : ["update", "usage", "prompt", "cancel"]);
+        expect(p.failures).toEqual([]);
+        await expect(p.connection.newSession({ cwd: "/work", mcpServers: [] })).resolves.toHaveProperty("sessionId");
+      },
+    );
+  });
+
+  describe.each(["rejected", "transport failure"] as const)("abort %s", (failure) => {
+    it.each(["no terminal", "unsettled terminal", "settled terminal"] as const)(
+      "closes the connection and refuses replacement work with %s",
+      async (terminal) => {
+        const p = peer();
+        peers.push(p);
+        const directory = await mkdtemp(join(tmpdir(), "omp-abort-failure-test-"));
+        directories.push(directory);
+        p.state.sessionFile = join(directory, "existing.jsonl");
+        await writeFile(p.state.sessionFile, '{"type":"session"}\n');
+        const session = await p.connection.newSession({ cwd: directory, mcpServers: [] });
+        const promptStarted = deferred<Record<string, unknown>>();
+        const abortStarted = deferred<Record<string, unknown>>();
+        p.setPrompt((command) => {
+          p.emit({ type: "response", id: command.id, command: "prompt", success: true });
+          promptStarted.resolve(command);
+        });
+        p.setAbort((command) => { abortStarted.resolve(command); });
+        const request = { sessionId: session.sessionId, prompt: [{ type: "text" as const, text: "running" }] };
+        const prompt = p.connection.prompt(request).then(
+          () => "resolved",
+          () => "rejected",
+        );
+        const command = await promptStarted.promise;
+        const cancellation = p.connection.cancel({ sessionId: session.sessionId });
+        const cancelled = expect(cancellation).rejects.toThrow();
+        const abort = await abortStarted.promise;
+        if (terminal !== "no terminal") {
+          p.emit({ type: "prompt_result", id: command.id, status: "completed", sessionSettled: terminal === "settled terminal" });
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        if (failure === "rejected") {
+          p.emit({ type: "response", id: abort.id, command: "abort", success: false, error: "fixture-secret" });
+        } else {
+          p.close();
+        }
+        await cancelled;
+        await expect(prompt).resolves.toBe("rejected");
+        expect(p.failures).toHaveLength(1);
+        expect(p.failures[0]?.message).not.toContain("fixture-secret");
+        const sent = p.received.length;
+        await expect(p.connection.prompt(request)).rejects.toThrow();
+        const switchRequest = { sessionId: session.sessionId, cwd: directory, mcpServers: [] };
+        await expect(p.connection.loadSession(switchRequest)).rejects.toThrow();
+        await expect(p.connection.resumeSession(switchRequest)).rejects.toThrow();
+        await expect(p.connection.newSession(switchRequest)).rejects.toThrow();
+        expect(p.received).toHaveLength(sent);
+      },
+    );
   });
 
   it("rejects an exact resume when OMP selects another native session", async () => {
