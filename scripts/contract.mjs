@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { access, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { constants, readFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
@@ -58,6 +58,75 @@ function deadline(promise, label) {
     promise,
     new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out`)), 30_000); }),
   ]).finally(() => clearTimeout(timer));
+}
+
+// POSIX：组长已退出时 kill(pid, 0) 为 ESRCH，进程组里仍可能有子孙。探测、强杀、等待都走 -pid。
+function nativeSignalTarget(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error(`Invalid native pid ${pid}`);
+  return process.platform === "win32" ? pid : -pid;
+}
+
+function nativeAlive(pid) {
+  try {
+    process.kill(nativeSignalTarget(pid), 0);
+    return true;
+  } catch (error) {
+    if (error.code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+async function reapNativePids(pids, timeoutMessage) {
+  const live = pids.filter((pid) => nativeAlive(pid));
+  for (const pid of live) {
+    try { process.kill(nativeSignalTarget(pid), "SIGKILL"); }
+    catch (error) { if (error.code !== "ESRCH") throw error; }
+  }
+  const reapEnds = performance.now() + 5_000;
+  for (const pid of live) {
+    for (;;) {
+      if (!nativeAlive(pid)) break;
+      if (performance.now() >= reapEnds) throw new Error(timeoutMessage);
+      await new Promise((done) => setTimeout(done, 25));
+    }
+  }
+  return live;
+}
+
+// PATH 查找对齐 spawn：跳过目录和非可执行项，继续后面的可执行普通文件。
+// Windows 按 PATHEXT 补扩展名；只接受原生 .exe，避免 .cmd/.bat 挡住后面的 omp.exe。
+function ompNamesFor(platform, pathext) {
+  if (platform !== "win32") return ["omp"];
+  const source = typeof pathext === "string" && pathext.length > 0 ? pathext : ".COM;.EXE;.BAT;.CMD";
+  const names = [];
+  for (const raw of source.split(";")) {
+    const entry = raw.trim();
+    if (!entry) continue;
+    const dotted = entry.startsWith(".") ? entry : `.${entry}`;
+    if (dotted.toLowerCase() !== ".exe") continue;
+    names.push(`omp${dotted}`);
+  }
+  return names;
+}
+
+async function executableRegularFile(candidate) {
+  let info;
+  try { info = await stat(candidate); }
+  catch { return false; }
+  if (!info.isFile()) return false;
+  if (process.platform === "win32") return true;
+  try { await access(candidate, constants.X_OK); return true; }
+  catch { return false; }
+}
+
+async function resolveOmpFromPath(pathValue) {
+  for (const directory of pathValue.split(delimiter).filter(Boolean)) {
+    for (const name of ompNamesFor(process.platform, process.env.PATHEXT)) {
+      const candidate = resolve(directory, name);
+      if (await executableRegularFile(candidate)) return candidate;
+    }
+  }
+  return undefined;
 }
 
 // 只读观察真实 child 的安全字段；不改真实 OMP 的命令、参数或帧。
@@ -186,25 +255,10 @@ function start({ fixture, childEnv = env, expectedExit = 0 } = {}) {
         if (failure && failure.message !== "Adapter closed before response") throw failure;
       } finally {
         // adapter 超时/强杀也不能留下它启动的独立 OMP 进程组。
-        const live = native().filter((event) => event.type === "spawn" && event.pid).filter(({ pid }) => {
-          try { process.kill(pid, 0); return true; }
-          catch (error) { if (error.code === "ESRCH") return false; throw error; }
-        });
-        for (const { pid } of live) {
-          try { process.kill(process.platform === "win32" ? pid : -pid, "SIGKILL"); }
-          catch (error) { if (error.code !== "ESRCH") throw error; }
-        }
-        const reapEnds = performance.now() + 5_000;
-        await (async () => {
-          for (const { pid } of live) {
-            for (;;) {
-              try { process.kill(pid, 0); }
-              catch (error) { if (error.code === "ESRCH") break; throw error; }
-              if (performance.now() >= reapEnds) throw new Error("Native child reap timed out");
-              await new Promise((done) => setTimeout(done, 25));
-            }
-          }
-        })();
+        const live = await reapNativePids(
+          native().filter((event) => event.type === "spawn" && event.pid).map(({ pid }) => pid),
+          "Native child reap timed out",
+        );
         assert.equal(live.length, 0, "Adapter left a native child alive; runner reaped it");
       }
     },
@@ -337,12 +391,7 @@ try {
   const bin = join(scratch, "bin");
   await mkdir(bin);
   let binary = selectedExecutable;
-  if (!binary) {
-    for (const directory of env.PATH.split(delimiter).filter(Boolean)) {
-      const candidate = resolve(directory, process.platform === "win32" ? "omp.exe" : "omp");
-      try { await access(candidate); binary = candidate; break; } catch { /* Try next PATH directory. */ }
-    }
-  }
+  if (!binary) binary = await resolveOmpFromPath(env.PATH);
   assert.ok(binary, "Install a real OMP on PATH; Windows requires a native omp.exe (or argv[3] .exe), not .cmd");
   if (process.platform === "win32") {
     assert.match(binary, /\.exe$/i, "Windows requires a native OMP .exe; shell/.cmd is unsupported");

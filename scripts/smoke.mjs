@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { access, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
@@ -94,6 +95,75 @@ async function trackNative(pidFile) {
   syncBuiltinESMExports();
 }
 
+// POSIX：组长已退出时 kill(pid, 0) 为 ESRCH，进程组里仍可能有子孙。探测、强杀、等待都走 -pid。
+function nativeSignalTarget(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error(`Invalid native pid ${pid}`);
+  return process.platform === "win32" ? pid : -pid;
+}
+
+function nativeAlive(pid) {
+  try {
+    process.kill(nativeSignalTarget(pid), 0);
+    return true;
+  } catch (error) {
+    if (error.code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+async function reapNativePids(pids, timeoutMessage) {
+  const live = pids.filter((pid) => nativeAlive(pid));
+  for (const pid of live) {
+    try { process.kill(nativeSignalTarget(pid), "SIGKILL"); }
+    catch (error) { if (error.code !== "ESRCH") throw error; }
+  }
+  const reapEnds = performance.now() + 5_000;
+  for (const pid of live) {
+    for (;;) {
+      if (!nativeAlive(pid)) break;
+      if (performance.now() >= reapEnds) throw new Error(timeoutMessage);
+      await new Promise((done) => setTimeout(done, 25));
+    }
+  }
+  return live;
+}
+
+// PATH 查找对齐 spawn：跳过目录和非可执行项，继续后面的可执行普通文件。
+// Windows 按 PATHEXT 补扩展名；只接受原生 .exe，避免 .cmd/.bat 挡住后面的 omp.exe。
+function ompNamesFor(platform, pathext) {
+  if (platform !== "win32") return ["omp"];
+  const source = typeof pathext === "string" && pathext.length > 0 ? pathext : ".COM;.EXE;.BAT;.CMD";
+  const names = [];
+  for (const raw of source.split(";")) {
+    const entry = raw.trim();
+    if (!entry) continue;
+    const dotted = entry.startsWith(".") ? entry : `.${entry}`;
+    if (dotted.toLowerCase() !== ".exe") continue;
+    names.push(`omp${dotted}`);
+  }
+  return names;
+}
+
+async function executableRegularFile(candidate) {
+  let info;
+  try { info = await stat(candidate); }
+  catch { return false; }
+  if (!info.isFile()) return false;
+  if (process.platform === "win32") return true;
+  try { await access(candidate, constants.X_OK); return true; }
+  catch { return false; }
+}
+
+async function resolveOmpFromPath(pathValue) {
+  for (const directory of pathValue.split(delimiter).filter(Boolean)) {
+    for (const name of ompNamesFor(process.platform, process.env.PATHEXT)) {
+      const candidate = resolve(directory, name);
+      if (await executableRegularFile(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}
+
 try {
   await Promise.all([
     mkdir(agentDir, { recursive: true }),
@@ -104,12 +174,7 @@ try {
   const bin = join(scratch, "bin");
   await mkdir(bin);
   let binary = executable;
-  if (!binary) {
-    for (const directory of env.PATH.split(delimiter).filter(Boolean)) {
-      const candidate = resolve(directory, process.platform === "win32" ? "omp.exe" : "omp");
-      try { await access(candidate); binary = candidate; break; } catch { /* Try next PATH directory. */ }
-    }
-  }
+  if (!binary) binary = await resolveOmpFromPath(env.PATH);
   assert.ok(binary, "OMP is required on PATH; Windows requires native omp.exe (or argv[3] .exe), not .cmd");
   if (process.platform === "win32") {
     assert.match(binary, /\.exe$/i, "Windows requires native OMP .exe; shell/.cmd is unsupported");
@@ -192,23 +257,10 @@ try {
         if (error.code === "ENOENT") return "";
         throw error;
       });
-      const live = pids.trim().split("\n").filter(Boolean).map(Number).filter((pid) => {
-        try { process.kill(pid, 0); return true; }
-        catch (error) { if (error.code === "ESRCH") return false; throw error; }
-      });
-      for (const pid of live) {
-        try { process.kill(process.platform === "win32" ? pid : -pid, "SIGKILL"); }
-        catch (error) { if (error.code !== "ESRCH") throw error; }
-      }
-      const reapEnds = performance.now() + 5_000;
-      for (const pid of live) {
-        for (;;) {
-          try { process.kill(pid, 0); }
-          catch (error) { if (error.code === "ESRCH") break; throw error; }
-          if (performance.now() >= reapEnds) throw new Error("OMP child reap timed out");
-          await new Promise((done) => setTimeout(done, 25));
-        }
-      }
+      const live = await reapNativePids(
+        pids.trim().split("\n").filter(Boolean).map(Number),
+        "OMP child reap timed out",
+      );
       assert.equal(live.length, 0, "Adapter left OMP alive; smoke reaped it");
     } finally {
       await rm(scratch, { recursive: true, force: true });
