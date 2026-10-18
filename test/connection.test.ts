@@ -31,6 +31,7 @@ type Peer = {
   usages: SessionUsageUpdate[];
   setPrompt(handler: (command: Record<string, unknown>) => void): void;
   setAbort(handler: (command: Record<string, unknown>) => void): void;
+  setSwitch(handler: (command: Record<string, unknown>) => void): void;
   setUpdate(handler: (notification: acp.SessionNotification) => Promise<void>): void;
   setUsage(handler: (usage: SessionUsageUpdate) => void): void;
   close(): void;
@@ -74,6 +75,9 @@ function peer(): Peer {
     if (!prompt) throw new Error("Abort has no active prompt");
     emit({ type: "prompt_result", id: prompt.id, agentInvoked: true, status: "aborted", sessionSettled: true });
   };
+  let onSwitch = (command: Record<string, unknown>) => {
+    reply(command, { cancelled: false });
+  };
   const writable = new WritableStream<Uint8Array>({
     write(bytes) {
       const command = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
@@ -86,7 +90,7 @@ function peer(): Peer {
           reply(command, { cancelled: false });
           break;
         case "switch_session":
-          reply(command, { cancelled: false });
+          onSwitch(command);
           break;
         case "prompt":
           onPrompt(command);
@@ -121,6 +125,9 @@ function peer(): Peer {
     },
     setAbort(handler: (command: Record<string, unknown>) => void) {
       onAbort = handler;
+    },
+    setSwitch(handler: (command: Record<string, unknown>) => void) {
+      onSwitch = handler;
     },
     setUpdate(handler: (notification: acp.SessionNotification) => Promise<void>) {
       onUpdate = handler;
@@ -792,6 +799,74 @@ describe("OMP RPC connection", () => {
     ).rejects.toThrow("different session");
     await expect(p.connection.prompt({ sessionId: previous.sessionId, prompt: [{ type: "text", text: "old identity" }] }))
       .rejects.toThrow("identity");
+  });
+
+  it("returns the requested sessionFile on resume without calling new_session", async () => {
+    const p = peer();
+    peers.push(p);
+    const directory = await mkdtemp(join(tmpdir(), "omp-resume-exact-"));
+    directories.push(directory);
+    const expected = join(directory, "expected.jsonl");
+    await writeFile(expected, '{"type":"session"}\n');
+    p.state.sessionFile = expected;
+    await expect(p.connection.resumeSession({ sessionId: expected, cwd: "/work", mcpServers: [] }))
+      .resolves.toMatchObject({ sessionId: expected });
+    expect(p.received.some((command) => command.type === "new_session")).toBe(false);
+    expect(p.received.filter((command) => command.type === "switch_session")).toEqual([
+      expect.objectContaining({ type: "switch_session", sessionPath: expected }),
+    ]);
+  });
+
+  it("rejects a missing or empty resume target without switch_session and blocks the old identity", async () => {
+    for (const kind of ["missing", "empty"] as const) {
+      const p = peer();
+      peers.push(p);
+      const previous = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+      const directory = await mkdtemp(join(tmpdir(), `omp-resume-${kind}-`));
+      directories.push(directory);
+      const target = join(directory, `${kind}.jsonl`);
+      if (kind === "empty") await writeFile(target, "");
+      await expect(p.connection.resumeSession({ sessionId: target, cwd: "/work", mcpServers: [] })).rejects.toThrow();
+      expect(p.received.some((command) => command.type === "switch_session")).toBe(false);
+      await expect(p.connection.prompt({ sessionId: previous.sessionId, prompt: [{ type: "text", text: "old identity" }] }))
+        .rejects.toThrow("identity");
+    }
+  });
+
+  it("does not forward a text delta injected before switch_session responds", async () => {
+    const p = peer();
+    peers.push(p);
+    await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    const directory = await mkdtemp(join(tmpdir(), "omp-resume-replay-"));
+    directories.push(directory);
+    const expected = join(directory, "resume.jsonl");
+    await writeFile(expected, '{"type":"session"}\n');
+    p.state.sessionFile = expected;
+    const switchSeen = deferred<Record<string, unknown>>();
+    p.setSwitch((command) => {
+      switchSeen.resolve(command);
+    });
+    const resume = p.connection.resumeSession({ sessionId: expected, cwd: "/work", mcpServers: [] });
+    const command = await switchSeen.promise;
+    p.emit({
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", delta: "must-not-replay" },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(p.updates).toEqual([]);
+    p.emit({
+      type: "response",
+      id: command.id,
+      command: "switch_session",
+      success: true,
+      data: { cancelled: false },
+    });
+    await expect(resume).resolves.toMatchObject({ sessionId: expected });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(p.updates).toEqual([]);
   });
 
   it("rejects a missing native session instead of creating an empty replacement", async () => {

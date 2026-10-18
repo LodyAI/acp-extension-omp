@@ -117,11 +117,14 @@ try {
   const port = endpoint.address().port;
   await writeFile(join(agentDir, "models.yml"), `providers:\n  contract:\n    baseUrl: http://127.0.0.1:${port}/v1\n    api: openai-completions\n    auth: none\n    models:\n      - id: contract-model\n        name: Contract Model\n        reasoning: false\n        input: [text]\n        contextWindow: 262144\n        maxTokens: 256\n`);
   await writeFile(join(agentDir, "config.yml"), "modelRoles:\n  default: contract/contract-model\n  smol: contract/contract-model\n  slow: contract/contract-model\n");
-  // Required case 1, and no unreviewed capability: load, resume, MCP, images and embedded context stay unadvertised.
+  // Required case 1: exact reviewed set. resume is advertised; load, MCP, images, and embedded context stay absent.
   const expectedInitialize = {
     protocolVersion: 1,
     agentInfo: { name: "omp-rpc", version: adapterPackage.version },
-    agentCapabilities: { promptCapabilities: { image: false, embeddedContext: false } },
+    agentCapabilities: {
+      promptCapabilities: { image: false, embeddedContext: false },
+      sessionCapabilities: { resume: {} },
+    },
     authMethods: [],
   };
   const initialized = async (client) => {

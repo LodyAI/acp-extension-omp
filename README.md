@@ -17,7 +17,8 @@ runtime manifest is changed.
 Before release, the 18.2.8/stable-version and OS matrices, independent maintainer
 review, reproducible runtime archive, public checksum read-back, and Lody
 end-to-end acceptance must pass. These gates are recorded in `TESTING.md` and
-`RELEASE.md`; optional load/resume/usage advertisements remain disabled.
+`RELEASE.md`. Resume is advertised from the exact native switch; load and usage
+stay unadvertised. This is not a production version declaration.
 
 改这个仓库的 agent 先读 `AGENTS.md`。能力与发布边界仍以 `README.md`、
 `COMPATIBILITY.md`、`TESTING.md`、`RELEASE.md`、`MIGRATION.md` 为准；
@@ -51,10 +52,12 @@ exact native session identity and Core usage accumulation. MCP configuration,
 images, steering, interactions, titles, and model mutation remain rejected or
 unadvertised until their OMP primitives are verified.
 
-Load, resume, and usage remain unadvertised in ACP initialize until the required
-baseline matrix and independent review pass. Their implemented methods are
-exercised explicitly by the contract runner; they are not a production support
-promise. Future OMP versions are not assumed compatible from their version alone.
+`session/resume` is advertised in ACP initialize as `sessionCapabilities.resume`:
+resume uses the exact native `sessionFile` switch and does not replay history.
+Load and usage remain unadvertised. This is not a production version declaration.
+The contract runner still exercises the implemented load and usage paths; they
+are not a production support promise. Future OMP versions are not assumed
+compatible from their version alone.
 
 The adapter launches only `omp --mode rpc`. OMP diagnostics go to stderr; ACP
 and OMP RPC traffic remain separate. Transport failure and child-process exit

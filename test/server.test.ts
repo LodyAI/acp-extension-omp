@@ -229,11 +229,14 @@ describe("OMP ACP server lifecycle", () => {
         protocolVersion: 1,
         clientCapabilities: {},
       });
-      // Exact match: an optional capability (load, resume, MCP, images, context) must not appear unreviewed.
+      // Exact match: resume is advertised; loadSession, MCP, images, and embedded context stay absent.
       expect(initialized).toEqual({
         protocolVersion: 1,
         agentInfo: { name: "omp-rpc", version: packageJson.version },
-        agentCapabilities: { promptCapabilities: { image: false, embeddedContext: false } },
+        agentCapabilities: {
+          promptCapabilities: { image: false, embeddedContext: false },
+          sessionCapabilities: { resume: {} },
+        },
         authMethods: [],
       });
       const session = await withTimeout(
