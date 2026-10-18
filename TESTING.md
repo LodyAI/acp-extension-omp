@@ -55,7 +55,10 @@ headers, cookies, model prompts, or raw provider responses.
 校验 OMP 的受控 runner；不得为填补此前置条件在 CI 下载 OMP，或让不可信 PR 使用
 自托管 runner。维护者应在无用户凭据的一次性账户／环境中，先构建并安装候选 tarball，
 再执行 `node scripts/contract.mjs /absolute/installed/dist/index.js /absolute/path/to/omp`。
-版本探测发生在 runner 内部 profile 隔离之前，因此外层环境也必须隔离。
+PR #12（`test/contract-hardening`）落地后，`scripts/smoke.mjs` 与
+`scripts/contract.mjs` 在 runner 内部 profile 隔离之后才执行 `omp --version`，
+并使用与适配器相同的隔离 env、cwd 和 PATH。在那之前，探测发生在隔离之前并继承
+调用方 env／cwd，因此外层环境也必须隔离。
 每行证据按 Required test record 记录；未完成的 Required cases 和平台限制仍阻断
 对应发布验收，不能因现有 runner 退出成功就视为全部通过。发布必须引用同一候选
 revision 的全部六行 CI 结果及经维护者核对的真实矩阵记录；CI 不会自动发布，也不会
