@@ -425,6 +425,7 @@ export class OmpRpcConnection {
         await task();
       } catch (error) {
         this.notificationFailure = error instanceof Error ? error : new Error(String(error));
+        this.rpc.close();
       }
     });
     this.notificationTail = run.catch(() => undefined);
@@ -436,10 +437,6 @@ export class OmpRpcConnection {
       const observed = this.notificationTail;
       await observed;
       if (this.notificationTail === observed) break;
-    }
-    if (this.notificationFailure) {
-      this.fail(this.notificationFailure);
-      return;
     }
     if (this.active !== active) return;
     const terminal = active.commandFailure
