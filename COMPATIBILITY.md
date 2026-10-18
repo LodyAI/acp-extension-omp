@@ -41,3 +41,11 @@ The adapter must not claim that a newer version is compatible solely because its
 version compares greater than 18.2.8. Compatibility evidence must include the
 actual OMP executable, launch arguments, profile isolation, test result, and
 captured non-secret diagnostic metadata.
+
+## 进程回收限制
+
+这些是当前关闭路径的已知边界，不是尚未实现的回收能力。不把进程树回收或 Job Object 算作支持。
+
+- POSIX：`groupAlive()` 对进程组发信号 0（`process.kill(-pgid, 0)`），除 `ESRCH` 外都视为仍有成员。尚未 reap 的僵尸仍属于该组，`kill(pid, 0)` 对僵尸成功，因此会被误判为存活。孤儿无人及时回收时（例如容器的 PID 1 不是 init），已经死亡的组仍可能让 `close` 失败。该容器场景没有在本仓库复现。
+- POSIX：组清空后，若在一次轮询间隔（25 ms）内同一 PGID 被新进程组占用，`groupAlive` 会把无关组当成仍有成员，截止时的 `SIGKILL` 可能打到该组。这是未验证的风险，不是已复现的缺陷。
+- Windows：只终止已拥有的直接子进程（结束 stdin，宽限期后 `ChildProcess.kill("SIGKILL")`；第二个关闭信号同样只杀该子进程）。不终止进程树，也不回收子孙。

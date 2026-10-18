@@ -66,7 +66,7 @@ function restorePath(value: string | undefined): void {
 }
 
 
-async function fakeOmp(mode: "serve" | "notify" | "exit" | "eof" | "malformed" | "missing" | "ignore-eof") {
+async function fakeOmp(mode: "serve" | "notify" | "exit" | "eof" | "malformed" | "missing" | "ignore-eof" | "abort-rejected") {
   const directory = await mkdtemp(join(tmpdir(), "acp-extension-omp-test-"));
   tempDirectories.push(directory);
   if (mode === "missing") return directory;
@@ -75,6 +75,9 @@ async function fakeOmp(mode: "serve" | "notify" | "exit" | "eof" | "malformed" |
 const readline = require("node:readline");
 const args = process.argv.slice(2);
 if (${JSON.stringify(mode)} === "exit") process.exit(23);
+if (${JSON.stringify(mode)} === "abort-rejected") {
+  require("node:fs").writeFileSync(require("node:path").join(__dirname, "child.pid"), String(process.pid));
+}
 if (${JSON.stringify(mode)} === "ignore-eof") {
   process.on("SIGTERM", () => {});
   require("node:fs").writeFileSync(require("node:path").join(__dirname, "child.pid"), String(process.pid));
@@ -88,7 +91,7 @@ if (${JSON.stringify(mode)} === "eof") process.stdout.end();
 if (${JSON.stringify(mode)} === "malformed") process.stdout.write("not-json\\n");
 const input = readline.createInterface({ input: process.stdin });
 input.on("line", (line) => {
-  if (${JSON.stringify(mode)} !== "serve" && ${JSON.stringify(mode)} !== "notify" && ${JSON.stringify(mode)} !== "ignore-eof") return;
+  if (!["serve", "notify", "ignore-eof", "abort-rejected"].includes(${JSON.stringify(mode)})) return;
   const command = JSON.parse(line);
   if (command.type === "new_session" || command.type === "switch_session") {
     process.stdout.write(JSON.stringify({ type: "response", id: command.id, command: command.type, success: true, data: {} }) + "\\n");
@@ -98,6 +101,10 @@ input.on("line", (line) => {
     // No ACK or terminal: notification failure must terminate this otherwise-live work.
     process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "synthetic" } }) + "\\n");
     process.stdout.write(JSON.stringify({ type: "message_end", messageId: "usage-1", message: { role: "assistant", provider: "fixture", model: "model", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } } }) + "\\n");
+  } else if (command.type === "prompt") {
+    process.stdout.write(JSON.stringify({ type: "response", id: command.id, command: "prompt", success: true }) + "\\n");
+  } else if (command.type === "abort") {
+    process.stdout.write(JSON.stringify({ type: "response", id: command.id, command: "abort", success: false }) + "\\n");
   }
 });
 `;
@@ -155,6 +162,7 @@ type PendingRequest = Deferred<unknown>;
 
 type Harness = {
   request<T>(method: string, params: Record<string, unknown>): Promise<T>;
+  notify(method: string, params: Record<string, unknown>): void;
   closed: Promise<void>;
   isClosed(): boolean;
   close(): Promise<void>;
@@ -207,6 +215,9 @@ function harness(
       pending.set(id, result);
       input.enqueue(encoder.encode(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`));
       return result.promise as Promise<T>;
+    },
+    notify(method: string, params: Record<string, unknown>) {
+      input.enqueue(encoder.encode(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`));
     },
     isClosed() {
       return server.connection.signal.aborted;
@@ -338,6 +349,39 @@ describe("OMP ACP server lifecycle", () => {
     },
     3 * FORCED_CLOSE_TIMEOUT_MS,
   );
+
+  it("closes ACP and reaps the OMP child when abort is rejected during a prompt", async () => {
+    const directory = await fakeOmp("abort-rejected");
+    const previousPath = process.env.PATH;
+    const previousExitCode = process.exitCode;
+    let ownedChild: ChildProcess | undefined;
+    const failures: Error[] = [];
+    process.env.PATH = [directory, dirname(process.execPath)].join(delimiter);
+    const client = harness(syntheticSpawn(directory, (child) => { ownedChild = child; }), (error) => { failures.push(error); });
+    try {
+      await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const session = await withTimeout(
+        client.request<{ sessionId: string }>("session/new", { cwd: directory, mcpServers: [] }),
+        "session/new", RPC_TIMEOUT_MS,
+      );
+      void client.request("session/prompt", {
+        sessionId: session.sessionId, prompt: [{ type: "text", text: "keep running" }],
+      }).catch(() => undefined);
+      client.notify("session/cancel", { sessionId: session.sessionId });
+      await withTimeout(client.closed, "ACP close after abort rejection", RPC_TIMEOUT_MS);
+      expect(client.isClosed()).toBe(true);
+      expect(failures).toHaveLength(1);
+      expect(process.exitCode).toBe(1);
+      await withTimeout(client.serverClose(), "OMP cleanup after abort rejection", FORCED_CLOSE_TIMEOUT_MS);
+      const pid = Number(await readFile(join(directory, "child.pid"), "utf8"));
+      expect(pid).toBe(ownedChild?.pid);
+      expect(processExists(pid)).toBe(false);
+    } finally {
+      restorePath(previousPath);
+      process.exitCode = previousExitCode;
+      await client.close();
+    }
+  }, FORCED_CLOSE_TIMEOUT_MS);
   // Real child-process exit and the production grace period require the OS clock; fake timers cannot terminate this process.
   it("force-terminates an OMP child that ignores stdin EOF", async () => {
     const previousExitCode = process.exitCode;

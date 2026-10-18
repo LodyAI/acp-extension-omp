@@ -32,6 +32,7 @@ type Peer = {
   failures: Error[];
   setPrompt(handler: (command: Record<string, unknown>) => void): void;
   setAbort(handler: (command: Record<string, unknown>) => void): void;
+  setSessionChange(handler: (command: Record<string, unknown>) => void): void;
   setUpdate(handler: (notification: acp.SessionNotification) => Promise<void>): void;
   setUsage(handler: (usage: SessionUsageUpdate) => void | Promise<void>): void;
   close(): void;
@@ -75,6 +76,9 @@ function peer(): Peer {
     if (!prompt) throw new Error("Abort has no active prompt");
     emit({ type: "prompt_result", id: prompt.id, agentInvoked: true, status: "aborted", sessionSettled: true });
   };
+  let onSessionChange = (command: Record<string, unknown>) => {
+    reply(command, { cancelled: false });
+  };
   const writable = new WritableStream<Uint8Array>({
     write(bytes) {
       const command = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
@@ -84,10 +88,8 @@ function peer(): Peer {
           reply(command, state);
           break;
         case "new_session":
-          reply(command, { cancelled: false });
-          break;
         case "switch_session":
-          reply(command, { cancelled: false });
+          onSessionChange(command);
           break;
         case "prompt":
           onPrompt(command);
@@ -124,6 +126,9 @@ function peer(): Peer {
     },
     setAbort(handler: (command: Record<string, unknown>) => void) {
       onAbort = handler;
+    },
+    setSessionChange(handler: (command: Record<string, unknown>) => void) {
+      onSessionChange = handler;
     },
     setUpdate(handler: (notification: acp.SessionNotification) => Promise<void>) {
       onUpdate = handler;
@@ -858,6 +863,201 @@ describe("OMP RPC connection", () => {
       .resolves.toEqual({ stopReason: "end_turn" });
   });
 
+  describe.each([
+    { status: "completed", stopReason: "end_turn", cancelResult: "done" },
+    { status: "aborted", stopReason: "cancelled", cancelResult: "done" },
+    { status: "error", stopReason: "error", cancelResult: "error" },
+  ])("late cancel after $status settlement", ({ status, stopReason, cancelResult }) => {
+    it.each(["prompt_result", "session_settled"] as const)(
+      "skips abort after native settlement via %s while notifications drain",
+      async (settlement) => {
+        const p = peer();
+        peers.push(p);
+        const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+        const updateStarted = deferred<void>();
+        const drain = deferred<void>();
+        const order: string[] = [];
+        p.setUpdate(async () => {
+          updateStarted.resolve(undefined);
+          await drain.promise;
+          order.push("update");
+        });
+        p.setPrompt((command) => {
+          p.emitBatch([
+            { type: "response", id: command.id, command: "prompt", success: true },
+            { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "last" } },
+            { type: "prompt_result", id: command.id, status, sessionSettled: settlement === "prompt_result" },
+            ...(settlement === "session_settled" ? [{ type: "session_settled" }] : []),
+          ]);
+        });
+        p.setAbort((command) => {
+          p.emit({ type: "response", id: command.id, command: "abort", success: false, error: "Already settled" });
+        });
+        const request = { sessionId: session.sessionId, prompt: [{ type: "text" as const, text: "late cancel" }] };
+        const prompt = p.connection.prompt(request).then(
+          (result) => { order.push("prompt"); return result.stopReason; },
+          () => { order.push("prompt"); return "error"; },
+        );
+        await updateStarted.promise;
+        const cancellation = p.connection.cancel({ sessionId: session.sessionId }).then(
+          () => { order.push("cancel"); return "done"; },
+          () => { order.push("cancel"); return "error"; },
+        );
+        try {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(p.received.filter((command) => command.type === "abort")).toEqual([]);
+          expect(order).toEqual([]);
+          await expect(p.connection.prompt(request)).rejects.toThrow("active");
+          await expect(p.connection.newSession({ cwd: "/work", mcpServers: [] })).rejects.toThrow("active");
+        } finally {
+          drain.resolve(undefined);
+        }
+        await expect(prompt).resolves.toBe(stopReason);
+        await expect(cancellation).resolves.toBe(cancelResult);
+        expect(order).toEqual(["update", "prompt", "cancel"]);
+        expect(p.failures).toEqual([]);
+        await expect(p.connection.newSession({ cwd: "/work", mcpServers: [] })).resolves.toHaveProperty("sessionId");
+      },
+    );
+  });
+
+  describe.each(["completed", "aborted", "error"] as const)("cancel settlement for %s", (status) => {
+    it.each(["before cancel", "before ACK", "after ACK", "settled before ACK"] as const)(
+      "waits for native settlement and notification drain with terminal %s",
+      async (timing) => {
+        const p = peer();
+        peers.push(p);
+        const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+        const promptStarted = deferred<Record<string, unknown>>();
+        const abortStarted = deferred<Record<string, unknown>>();
+        p.setPrompt((command) => {
+          p.emit({ type: "response", id: command.id, command: "prompt", success: true });
+          promptStarted.resolve(command);
+        });
+        p.setAbort((command) => { abortStarted.resolve(command); });
+        const request = { sessionId: session.sessionId, prompt: [{ type: "text" as const, text: "wait" }] };
+        const order: string[] = [];
+        const prompt = p.connection.prompt(request).then(
+          (result) => { order.push("prompt"); return result.stopReason; },
+          () => { order.push("prompt"); return "error"; },
+        );
+        const command = await promptStarted.promise;
+        const terminal = { type: "prompt_result", id: command.id, status, sessionSettled: false };
+        if (timing === "before cancel") {
+          p.emit(terminal);
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        const cancellation = p.connection.cancel({ sessionId: session.sessionId }).then(
+          () => { order.push("cancel"); return "done"; },
+          () => { order.push("cancel"); return "error"; },
+        );
+        const abort = await abortStarted.promise;
+        if (timing !== "before cancel" && timing !== "after ACK") p.emit(terminal);
+        if (timing === "settled before ACK") {
+          p.emit({ type: "session_settled" });
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(order).toEqual([]);
+        }
+        p.emit({ type: "response", id: abort.id, command: "abort", success: true });
+        if (timing === "after ACK") {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          p.emit(terminal);
+        }
+        if (timing !== "settled before ACK") {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(order).toEqual([]);
+          const sent = p.received.length;
+          await expect(p.connection.prompt(request)).rejects.toThrow("active");
+          const switchRequest = { sessionId: session.sessionId, cwd: "/work", mcpServers: [] };
+          await expect(p.connection.newSession(switchRequest)).rejects.toThrow("active");
+          await expect(p.connection.loadSession(switchRequest)).rejects.toThrow("active");
+          await expect(p.connection.resumeSession(switchRequest)).rejects.toThrow("active");
+          expect(p.received).toHaveLength(sent);
+          const updateStarted = deferred<void>();
+          const drain = deferred<void>();
+          p.setUpdate(async () => {
+            updateStarted.resolve(undefined);
+            await drain.promise;
+            order.push("update");
+          });
+          p.setUsage(() => { order.push("usage"); });
+          p.emitBatch([
+            { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "last" } },
+            {
+              type: "message_end",
+              messageId: "last",
+              message: {
+                role: "assistant", provider: "fixture", model: "model",
+                usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+              },
+            },
+            { type: "session_settled" },
+          ]);
+          await updateStarted.promise;
+          await expect(p.connection.prompt(request)).rejects.toThrow("active");
+          expect(order).toEqual([]);
+          drain.resolve(undefined);
+        }
+        await expect(prompt).resolves.toBe(status === "completed" ? "end_turn" : status === "aborted" ? "cancelled" : "error");
+        await expect(cancellation).resolves.toBe(status === "error" ? "error" : "done");
+        expect(order).toEqual(timing === "settled before ACK" ? ["prompt", "cancel"] : ["update", "usage", "prompt", "cancel"]);
+        expect(p.failures).toEqual([]);
+        await expect(p.connection.newSession({ cwd: "/work", mcpServers: [] })).resolves.toHaveProperty("sessionId");
+      },
+    );
+  });
+
+  describe.each(["rejected", "transport failure"] as const)("abort %s", (failure) => {
+    it.each(["no terminal", "unsettled terminal", "settled terminal"] as const)(
+      "closes the connection and refuses replacement work with %s",
+      async (terminal) => {
+        const p = peer();
+        peers.push(p);
+        const directory = await mkdtemp(join(tmpdir(), "omp-abort-failure-test-"));
+        directories.push(directory);
+        p.state.sessionFile = join(directory, "existing.jsonl");
+        await writeFile(p.state.sessionFile, '{"type":"session"}\n');
+        const session = await p.connection.newSession({ cwd: directory, mcpServers: [] });
+        const promptStarted = deferred<Record<string, unknown>>();
+        const abortStarted = deferred<Record<string, unknown>>();
+        p.setPrompt((command) => {
+          p.emit({ type: "response", id: command.id, command: "prompt", success: true });
+          promptStarted.resolve(command);
+        });
+        p.setAbort((command) => { abortStarted.resolve(command); });
+        const request = { sessionId: session.sessionId, prompt: [{ type: "text" as const, text: "running" }] };
+        const prompt = p.connection.prompt(request).then(
+          () => "resolved",
+          () => "rejected",
+        );
+        const command = await promptStarted.promise;
+        const cancellation = p.connection.cancel({ sessionId: session.sessionId });
+        const cancelled = expect(cancellation).rejects.toThrow();
+        const abort = await abortStarted.promise;
+        if (terminal !== "no terminal") {
+          p.emit({ type: "prompt_result", id: command.id, status: "completed", sessionSettled: terminal === "settled terminal" });
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        if (failure === "rejected") {
+          p.emit({ type: "response", id: abort.id, command: "abort", success: false, error: "fixture-secret" });
+        } else {
+          p.close();
+        }
+        await cancelled;
+        await expect(prompt).resolves.toBe("rejected");
+        expect(p.failures).toHaveLength(1);
+        expect(p.failures[0]?.message).not.toContain("fixture-secret");
+        const sent = p.received.length;
+        await expect(p.connection.prompt(request)).rejects.toThrow();
+        const switchRequest = { sessionId: session.sessionId, cwd: directory, mcpServers: [] };
+        await expect(p.connection.loadSession(switchRequest)).rejects.toThrow();
+        await expect(p.connection.resumeSession(switchRequest)).rejects.toThrow();
+        await expect(p.connection.newSession(switchRequest)).rejects.toThrow();
+        expect(p.received).toHaveLength(sent);
+      },
+    );
+  });
+
   it("rejects an exact resume when OMP selects another native session", async () => {
     const p = peer();
     peers.push(p);
@@ -884,17 +1084,80 @@ describe("OMP RPC connection", () => {
       .rejects.toThrow();
     expect(p.received.some((command) => command.type === "switch_session")).toBe(false);
   });
-  it.each(["missing", "empty"] as const)("invalid exact session switch (%s) invalidates the previous ACP identity", async (kind) => {
+  it.each([
+    ["load", "missing"], ["load", "empty"], ["load", "directory"],
+    ["resume", "missing"], ["resume", "empty"], ["resume", "directory"],
+  ] as const)("invalid %s session switch (%s) invalidates the previous ACP identity", async (operation, kind) => {
     const p = peer();
     peers.push(p);
     const previous = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
     const directory = await mkdtemp(join(tmpdir(), "omp-invalid-switch-test-"));
     directories.push(directory);
-    const target = join(directory, `${kind}.jsonl`);
+    const target = kind === "directory" ? directory : join(directory, `${kind}.jsonl`);
     if (kind === "empty") await writeFile(target, "");
-    await expect(p.connection.loadSession({ sessionId: target, cwd: "/work", mcpServers: [] })).rejects.toThrow();
+    const request = { sessionId: target, cwd: "/work", mcpServers: [] };
+    const changed = operation === "load" ? p.connection.loadSession(request) : p.connection.resumeSession(request);
+    await expect(changed).rejects.toThrow();
+    expect(p.received.some((command) => command.type === "switch_session")).toBe(false);
     await expect(p.connection.prompt({ sessionId: previous.sessionId, prompt: [{ type: "text", text: "old identity" }] }))
       .rejects.toThrow("identity");
+    expect(p.received.some((command) => command.type === "prompt")).toBe(false);
+  });
+
+  it.each([
+    ["new", "rejected"], ["new", "cancelled"],
+    ["load", "rejected"], ["load", "cancelled"],
+    ["resume", "rejected"], ["resume", "cancelled"],
+  ] as const)("failed %s session switch (%s) stays closed until a fresh session is verified", async (operation, failure) => {
+    const p = peer();
+    peers.push(p);
+    const previous = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    const directory = await mkdtemp(join(tmpdir(), "omp-failed-switch-test-"));
+    directories.push(directory);
+    const target = join(directory, "replacement.jsonl");
+    await writeFile(target, '{"type":"session"}\n');
+    const started = deferred<Record<string, unknown>>();
+    p.setSessionChange((command) => started.resolve(command));
+    const request = { sessionId: target, cwd: "/work", mcpServers: [] };
+    const changed = operation === "new" ? p.connection.newSession(request)
+      : operation === "load" ? p.connection.loadSession(request) : p.connection.resumeSession(request);
+    const command = await started.promise;
+    const oldPrompt = { sessionId: previous.sessionId, prompt: [{ type: "text" as const, text: "old identity" }] };
+    await expect(p.connection.prompt(oldPrompt)).rejects.toThrow("active");
+    const rejected = expect(changed).rejects.toThrow(failure === "rejected" ? "OMP RPC command failed" : "cancelled");
+    p.emit({
+      type: "response", id: command.id, command: command.type,
+      success: failure !== "rejected", data: { cancelled: true },
+    });
+    await rejected;
+    await expect(p.connection.prompt(oldPrompt)).rejects.toThrow("identity");
+    expect(p.received.some((command) => command.type === "prompt")).toBe(false);
+    p.emitBatch([
+      { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "stale text" } },
+      {
+        type: "message_end", messageId: "stale-message",
+        message: {
+          role: "assistant", provider: "fixture", model: "model",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+        },
+      },
+    ]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(p.updates).toEqual([]);
+    expect(p.usages).toEqual([]);
+
+    p.setSessionChange((next) => p.emit({
+      type: "response", id: next.id, command: next.type, success: true, data: { cancelled: false },
+    }));
+    p.state.sessionFile = target;
+    const fresh = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    expect(fresh.sessionId).toBe(target);
+    await expect(p.connection.prompt(oldPrompt)).rejects.toThrow("identity");
+    await expect(p.connection.prompt({ ...oldPrompt, sessionId: fresh.sessionId })).resolves.toEqual({ stopReason: "end_turn" });
+    expect(p.updates).toEqual([{
+      sessionId: target,
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hello" } },
+    }]);
   });
 
   it.each(["new", "load", "resume"] as const)("refuses session %s while a prompt is active", async (operation) => {

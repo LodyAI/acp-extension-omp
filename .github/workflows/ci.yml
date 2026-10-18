@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         node: ["22.14.0", "23.6.0"]
     steps:
       - uses: actions/checkout@v4
@@ -22,3 +22,7 @@ jobs:
       - run: npm run check
       - run: npm run build
       - run: npm pack --dry-run
+      # All packaging checks run on Windows too; only the existing POSIX signal
+      # suite and live-child stdout EOF case remain skipped inside vitest.
+      - name: Verify reproducible builds and tarball installation
+        run: node scripts/verify-package.mjs
