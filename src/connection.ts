@@ -220,8 +220,12 @@ export class OmpRpcConnection {
     const active = this.active;
     if (!active) return;
     this.cancellationInFlight = active;
-    active.abortState = "requested";
     try {
+      if (active.terminal?.sessionSettled === true) {
+        await active.done;
+        return;
+      }
+      active.abortState = "requested";
       await this.rpc.request("abort");
       active.abortState = "acknowledged";
       if (active.terminal && active.terminal.sessionSettled !== false) void this.finishPrompt(active, active.terminal);
@@ -427,6 +431,7 @@ export class OmpRpcConnection {
   }
 
   private async finishPrompt(active: ActivePrompt, frame: Record<string, unknown>): Promise<void> {
+    if (frame.sessionSettled === true) active.terminal = frame;
     for (;;) {
       const observed = this.notificationTail;
       await observed;

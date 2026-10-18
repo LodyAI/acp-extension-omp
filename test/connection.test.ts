@@ -781,6 +781,64 @@ describe("OMP RPC connection", () => {
       .resolves.toEqual({ stopReason: "end_turn" });
   });
 
+  describe.each([
+    { status: "completed", stopReason: "end_turn", cancelResult: "done" },
+    { status: "aborted", stopReason: "cancelled", cancelResult: "done" },
+    { status: "error", stopReason: "error", cancelResult: "error" },
+  ])("late cancel after $status settlement", ({ status, stopReason, cancelResult }) => {
+    it.each(["prompt_result", "session_settled"] as const)(
+      "skips abort after native settlement via %s while notifications drain",
+      async (settlement) => {
+        const p = peer();
+        peers.push(p);
+        const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+        const updateStarted = deferred<void>();
+        const drain = deferred<void>();
+        const order: string[] = [];
+        p.setUpdate(async () => {
+          updateStarted.resolve(undefined);
+          await drain.promise;
+          order.push("update");
+        });
+        p.setPrompt((command) => {
+          p.emitBatch([
+            { type: "response", id: command.id, command: "prompt", success: true },
+            { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "last" } },
+            { type: "prompt_result", id: command.id, status, sessionSettled: settlement === "prompt_result" },
+            ...(settlement === "session_settled" ? [{ type: "session_settled" }] : []),
+          ]);
+        });
+        p.setAbort((command) => {
+          p.emit({ type: "response", id: command.id, command: "abort", success: false, error: "Already settled" });
+        });
+        const request = { sessionId: session.sessionId, prompt: [{ type: "text" as const, text: "late cancel" }] };
+        const prompt = p.connection.prompt(request).then(
+          (result) => { order.push("prompt"); return result.stopReason; },
+          () => { order.push("prompt"); return "error"; },
+        );
+        await updateStarted.promise;
+        const cancellation = p.connection.cancel({ sessionId: session.sessionId }).then(
+          () => { order.push("cancel"); return "done"; },
+          () => { order.push("cancel"); return "error"; },
+        );
+        try {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(p.received.filter((command) => command.type === "abort")).toEqual([]);
+          expect(order).toEqual([]);
+          await expect(p.connection.prompt(request)).rejects.toThrow("active");
+          await expect(p.connection.newSession({ cwd: "/work", mcpServers: [] })).rejects.toThrow("active");
+        } finally {
+          drain.resolve(undefined);
+        }
+        await expect(prompt).resolves.toBe(stopReason);
+        await expect(cancellation).resolves.toBe(cancelResult);
+        expect(order).toEqual(["update", "prompt", "cancel"]);
+        expect(p.failures).toEqual([]);
+        await expect(p.connection.newSession({ cwd: "/work", mcpServers: [] })).resolves.toHaveProperty("sessionId");
+      },
+    );
+  });
+
   describe.each(["completed", "aborted", "error"] as const)("cancel settlement for %s", (status) => {
     it.each(["before cancel", "before ACK", "after ACK", "settled before ACK"] as const)(
       "waits for native settlement and notification drain with terminal %s",
