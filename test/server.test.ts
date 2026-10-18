@@ -66,7 +66,7 @@ function restorePath(value: string | undefined): void {
 }
 
 
-async function fakeOmp(mode: "serve" | "exit" | "eof" | "malformed" | "missing" | "ignore-eof") {
+async function fakeOmp(mode: "serve" | "notify" | "exit" | "eof" | "malformed" | "missing" | "ignore-eof" | "abort-rejected") {
   const directory = await mkdtemp(join(tmpdir(), "acp-extension-omp-test-"));
   tempDirectories.push(directory);
   if (mode === "missing") return directory;
@@ -75,6 +75,9 @@ async function fakeOmp(mode: "serve" | "exit" | "eof" | "malformed" | "missing" 
 const readline = require("node:readline");
 const args = process.argv.slice(2);
 if (${JSON.stringify(mode)} === "exit") process.exit(23);
+if (${JSON.stringify(mode)} === "abort-rejected") {
+  require("node:fs").writeFileSync(require("node:path").join(__dirname, "child.pid"), String(process.pid));
+}
 if (${JSON.stringify(mode)} === "ignore-eof") {
   process.on("SIGTERM", () => {});
   require("node:fs").writeFileSync(require("node:path").join(__dirname, "child.pid"), String(process.pid));
@@ -88,12 +91,20 @@ if (${JSON.stringify(mode)} === "eof") process.stdout.end();
 if (${JSON.stringify(mode)} === "malformed") process.stdout.write("not-json\\n");
 const input = readline.createInterface({ input: process.stdin });
 input.on("line", (line) => {
-  if (${JSON.stringify(mode)} !== "serve" && ${JSON.stringify(mode)} !== "ignore-eof") return;
+  if (!["serve", "notify", "ignore-eof", "abort-rejected"].includes(${JSON.stringify(mode)})) return;
   const command = JSON.parse(line);
   if (command.type === "new_session" || command.type === "switch_session") {
     process.stdout.write(JSON.stringify({ type: "response", id: command.id, command: command.type, success: true, data: {} }) + "\\n");
   } else if (command.type === "get_state") {
     process.stdout.write(JSON.stringify({ type: "response", id: command.id, command: command.type, success: true, data: { sessionFile: "/tmp/fake-omp-session.jsonl", model: { provider: "fixture", id: "model", name: "Fixture" } } }) + "\\n");
+  } else if (command.type === "prompt" && ${JSON.stringify(mode)} === "notify") {
+    // No ACK or terminal: notification failure must terminate this otherwise-live work.
+    process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "synthetic" } }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "message_end", messageId: "usage-1", message: { role: "assistant", provider: "fixture", model: "model", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } } }) + "\\n");
+  } else if (command.type === "prompt") {
+    process.stdout.write(JSON.stringify({ type: "response", id: command.id, command: "prompt", success: true }) + "\\n");
+  } else if (command.type === "abort") {
+    process.stdout.write(JSON.stringify({ type: "response", id: command.id, command: "abort", success: false }) + "\\n");
   }
 });
 `;
@@ -151,19 +162,24 @@ type PendingRequest = Deferred<unknown>;
 
 type Harness = {
   request<T>(method: string, params: Record<string, unknown>): Promise<T>;
+  notify(method: string, params: Record<string, unknown>): void;
   closed: Promise<void>;
   isClosed(): boolean;
   close(): Promise<void>;
   serverClose(): Promise<void>;
 };
 
-function harness(spawnProcess?: SyntheticSpawn, onParentFailure: (error: Error) => void = () => {}): Harness {
+function harness(
+  spawnProcess?: SyntheticSpawn,
+  onParentFailure: (error: Error) => void = () => {},
+  onOutput: (message: { id?: number; method?: string; result?: unknown }, controller: WritableStreamDefaultController) => void = () => {},
+): Harness {
   let input!: ReadableStreamDefaultController<Uint8Array>;
   const pending = new Map<number, PendingRequest>();
   let nextId = 0;
   let buffered = "";
   const output = new WritableStream<Uint8Array>({
-    write(bytes) {
+    write(bytes, controller) {
       buffered += decoder.decode(bytes, { stream: true });
       for (;;) {
         const separator = buffered.indexOf("\n");
@@ -171,7 +187,8 @@ function harness(spawnProcess?: SyntheticSpawn, onParentFailure: (error: Error) 
         const line = buffered.slice(0, separator);
         buffered = buffered.slice(separator + 1);
         if (!line) continue;
-        const message = JSON.parse(line) as { id?: number; result?: unknown; error?: { message?: string } };
+        const message = JSON.parse(line) as { id?: number; method?: string; result?: unknown; error?: { message?: string } };
+        onOutput(message, controller);
         if (message.id === undefined) continue;
         const request = pending.get(message.id);
         if (!request) continue;
@@ -198,6 +215,9 @@ function harness(spawnProcess?: SyntheticSpawn, onParentFailure: (error: Error) 
       pending.set(id, result);
       input.enqueue(encoder.encode(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`));
       return result.promise as Promise<T>;
+    },
+    notify(method: string, params: Record<string, unknown>) {
+      input.enqueue(encoder.encode(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`));
     },
     isClosed() {
       return server.connection.signal.aborted;
@@ -274,6 +294,94 @@ describe("OMP ACP server lifecycle", () => {
       await client.close();
     }
   });
+  it.each(["text-reject", "usage-reject", "output-closed"] as const)(
+    "closes ACP and reaps OMP after SDK notification %s without a terminal",
+    async (mode) => {
+      const directory = await fakeOmp("notify");
+      const previousPath = process.env.PATH;
+      const previousExitCode = process.exitCode;
+      process.env.PATH = [directory, dirname(process.execPath)].join(delimiter);
+      let child: ChildProcess | undefined;
+      const exited = Promise.withResolvers<void>();
+      const responses: { id?: number; method?: string; result?: unknown }[] = [];
+      const client = harness(
+        syntheticSpawn(directory, (owned) => {
+          child = owned;
+          owned.once("exit", () => exited.resolve());
+        }),
+        undefined,
+        (message, controller) => {
+          responses.push(message);
+          const text = message.method === "session/update";
+          const usage = message.method === "_lody/session/usage_update";
+          if (mode === "output-closed" && text) controller.error(new Error("synthetic-private-output-closed"));
+          if ((mode === "text-reject" && text) || (mode === "usage-reject" && usage)) {
+            throw new Error("synthetic-private-writable-rejection");
+          }
+        },
+      );
+      try {
+        const session = await withTimeout(
+          client.request<{ sessionId: string }>("session/new", { cwd: directory, mcpServers: [] }),
+          "session/new",
+          RPC_TIMEOUT_MS,
+        );
+        void client.request("session/prompt", {
+          sessionId: session.sessionId,
+          prompt: [{ type: "text", text: "synthetic" }],
+        }).catch(() => undefined);
+        await withTimeout(client.closed, "ACP closure after notification failure", RPC_TIMEOUT_MS);
+        await withTimeout(exited.promise, "OMP exit after notification failure", FORCED_CLOSE_TIMEOUT_MS);
+        expect(client.isClosed()).toBe(true);
+        const failedMethod = mode === "usage-reject" ? "_lody/session/usage_update" : "session/update";
+        expect(responses.some((message) => message.method === failedMethod)).toBe(true);
+        expect(responses.some((message) => message.id === 2 && message.result !== undefined)).toBe(false);
+        expect(child?.pid).toBeDefined();
+        expect(processExists(child!.pid!)).toBe(false);
+      } finally {
+        restorePath(previousPath);
+        try {
+          await client.close();
+        } finally {
+          process.exitCode = previousExitCode;
+        }
+      }
+    },
+    3 * FORCED_CLOSE_TIMEOUT_MS,
+  );
+
+  it("closes ACP and reaps the OMP child when abort is rejected during a prompt", async () => {
+    const directory = await fakeOmp("abort-rejected");
+    const previousPath = process.env.PATH;
+    const previousExitCode = process.exitCode;
+    let ownedChild: ChildProcess | undefined;
+    const failures: Error[] = [];
+    process.env.PATH = [directory, dirname(process.execPath)].join(delimiter);
+    const client = harness(syntheticSpawn(directory, (child) => { ownedChild = child; }), (error) => { failures.push(error); });
+    try {
+      await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const session = await withTimeout(
+        client.request<{ sessionId: string }>("session/new", { cwd: directory, mcpServers: [] }),
+        "session/new", RPC_TIMEOUT_MS,
+      );
+      void client.request("session/prompt", {
+        sessionId: session.sessionId, prompt: [{ type: "text", text: "keep running" }],
+      }).catch(() => undefined);
+      client.notify("session/cancel", { sessionId: session.sessionId });
+      await withTimeout(client.closed, "ACP close after abort rejection", RPC_TIMEOUT_MS);
+      expect(client.isClosed()).toBe(true);
+      expect(failures).toHaveLength(1);
+      expect(process.exitCode).toBe(1);
+      await withTimeout(client.serverClose(), "OMP cleanup after abort rejection", FORCED_CLOSE_TIMEOUT_MS);
+      const pid = Number(await readFile(join(directory, "child.pid"), "utf8"));
+      expect(pid).toBe(ownedChild?.pid);
+      expect(processExists(pid)).toBe(false);
+    } finally {
+      restorePath(previousPath);
+      process.exitCode = previousExitCode;
+      await client.close();
+    }
+  }, FORCED_CLOSE_TIMEOUT_MS);
   // Real child-process exit and the production grace period require the OS clock; fake timers cannot terminate this process.
   it("force-terminates an OMP child that ignores stdin EOF", async () => {
     const previousExitCode = process.exitCode;
