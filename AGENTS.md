@@ -39,7 +39,7 @@
 
 `omp` 不在 `PATH` 上就停止。不要下载，也不要捆绑。
 
-CI 变绿不是矩阵通过。CI 只跑 check、build 和 `npm pack --dry-run`。
+CI 变绿不是矩阵通过。CI 执行 `npm ci`、`npm run check`、`npm run build`、`npm pack --dry-run` 和 `node scripts/verify-package.mjs`。
 
 ## 写入纪律
 
