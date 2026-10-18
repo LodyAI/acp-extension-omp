@@ -6,25 +6,25 @@ does not bundle OMP, inspect credentials, or persist user session data.
 
 ## Collaboration status
 
-This is a runnable collaboration branch, not a published Lody provider or an
-OMP compatibility release. Local verification covers OMP 18.2.8 (Node 22.22.3, full record in `TESTING.md`),
-OMP 18.3.1 (Node 22.22.3) and OMP 18.8.4 (Node 26.10.0 and 22.15.0) on macOS
-arm64, with real OMP contract
-runs against a loopback-only synthetic model. The 39 synthetic regression tests in `npm run check` do not use OMP and
-are not tied to that evidence row; one stdout-EOF case and eight adapter-process
-cases run only on POSIX and are skipped on Windows. No production
-runtime manifest is changed.
+这是一个可运行的协作分支，不是已发布的 Lody provider，也不是 OMP 兼容性发布。
+本地验证覆盖 macOS arm64 上的 OMP 18.2.8（Node 22.22.3，完整记录见 `TESTING.md`）、
+OMP 18.3.1（Node 22.22.3）和 OMP 18.8.4（Node 26.10.0 和 22.15.0），
+使用仅限回环地址的合成模型运行真实 OMP 合同测试。
+`npm run check` 中的 39 项合成回归测试不使用 OMP，
+也不与该证据行绑定；其中一项 stdout-EOF 用例和八项适配器进程用例
+仅在 POSIX 上运行，在 Windows 上跳过。不修改任何生产环境的
+运行时清单。
 
-Before release, the stable-version and OS matrices（包括 18.2.8 在 macOS 以外的系统）, independent maintainer
-review, reproducible runtime archive, public checksum read-back, and Lody
-end-to-end acceptance must pass. These gates are recorded in `TESTING.md` and
-`RELEASE.md`; optional load/resume/usage advertisements remain disabled.
+发布前，必须通过稳定版本和操作系统矩阵（包括 18.2.8 在 macOS 以外的系统）、
+独立维护者审核、可复现的运行时归档、公开校验和回读以及 Lody
+端到端验收。这些门禁记录在 `TESTING.md` 和
+`RELEASE.md` 中；可选的 load/resume/usage 能力宣告仍保持禁用。
 
 改这个仓库的 agent 先读 `AGENTS.md`。能力与发布边界仍以 `README.md`、
 `COMPATIBILITY.md`、`TESTING.md`、`RELEASE.md`、`MIGRATION.md` 为准；
 `docs-ai/` 不是能力合同。
 
-For collaborators:
+协作者可使用以下命令：
 
 ```sh
 git clone --branch main https://github.com/LodyAI/acp-extension-omp.git
@@ -32,16 +32,16 @@ cd acp-extension-omp
 npm ci --ignore-scripts
 npm run check
 npm run build
-# Requires user-installed OMP; uses no credentials or paid model endpoint.
+# 需要用户自行安装 OMP；不使用凭据或付费模型端点。
 npm run contract
 ```
 
-Review this branch before merging; do not use it to publish a runtime or update
-Lody's managed-runtime manifest. No independent reviewer approval is claimed.
+合并前请审核此分支；不要用它发布运行时或更新
+Lody 的托管运行时清单。本分支不声称已获独立审核者批准。
 
 
 ```text
-Lody → acp-extension-omp → user-installed omp --mode rpc
+Lody → acp-extension-omp → 用户安装的 omp --mode rpc
 ```
 
 ## V1 contract

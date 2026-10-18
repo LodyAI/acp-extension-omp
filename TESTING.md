@@ -78,30 +78,30 @@ Local evidence, not a release declaration.
   uncompressed tar, but different gzip bytes (18111 bytes), so the release
   toolchain must be recorded with the digest.
 
-### Matrix record: OMP 18.2.8 (2026-10-17)
+### 矩阵记录：OMP 18.2.8 (2026-10-17)
 
-Local evidence, not a release declaration. Minimum real-contract baseline.
+本地证据，不是发布声明。最低真实合同基线。
 
-| Field | Value |
+| 字段 | 值 |
 | --- | --- |
-| OMP | 18.2.8, official release asset `omp-darwin-arm64` (cached copy; `--version` reports `omp/18.2.8`) |
-| OMP digest | SHA-256 `cf8d34a7fe6f60de1acbe74f29c82026e4c07888e9d89f7ebceeb922159e5787`, 193484176 bytes |
+| OMP | 18.2.8，官方发布制品 `omp-darwin-arm64`（缓存副本；`--version` 报告 `omp/18.2.8`） |
+| OMP 摘要 | SHA-256 `cf8d34a7fe6f60de1acbe74f29c82026e4c07888e9d89f7ebceeb922159e5787`，193484176 字节 |
 | Node | 22.22.3 (npm 10.9.8) |
 | OS | macOS (Darwin 27.2.0) arm64 |
-| Adapter commit | `4622df91ab1a97e9b0b01815f803d016d0c9edd6` (clean worktree, `git status` empty before and after) |
+| 适配器提交 | `4622df91ab1a97e9b0b01815f803d016d0c9edd6`（干净工作树，运行前后 `git status` 均为空） |
 | Core | `acp-extension-core` 0.1.8 |
-| Test profile | `contract` (smoke: per-run `lody-smoke-<pid>`), temporary HOME, loopback-only model |
-| Entry under test | `dist/index.js` built from the clean worktree after `npm ci` and `npm run check` (69 tests passed) |
-| Result | Pass: `npm run smoke` and `npm run contract` |
+| 测试配置 | `contract`（smoke：每次运行使用 `lody-smoke-<pid>`），临时 HOME，仅限回环地址的模型 |
+| 被测入口 | 在干净工作树中执行 `npm ci` 和 `npm run check`（69 项测试通过）后构建的 `dist/index.js` |
+| 结果 | 通过：`npm run smoke` 和 `npm run contract` |
 
-- Required cases 1–8 ran against the real executable and passed.
-- Case 9 (child failure) is covered by synthetic tests on Linux, macOS and
-  Windows CI, not by this real-executable row.
-- `scripts/smoke.mjs` invokes `omp` from `PATH` and takes no executable
-  argument, so smoke was run with a temporary `PATH` shim pointing to the cached
-  18.2.8 binary. A first unshimmed run used the system OMP 18.11.3 and is not
-  counted. `npm run contract` received the 18.2.8 path explicitly.
-- Other OS targets for 18.2.8 remain unverified.
+- 必测用例 1–8 使用真实可执行文件运行并通过。
+- 用例 9（子进程失败）由 Linux、macOS 和 Windows CI 上的合成测试覆盖，
+  不属于本条真实可执行文件记录的覆盖范围。
+- `scripts/smoke.mjs` 从 `PATH` 调用 `omp`，不接受可执行文件参数，
+  因此运行 smoke 时使用了临时 `PATH` shim，指向缓存的 18.2.8 二进制文件。
+  首次未使用 shim 的运行使用了系统 OMP 18.11.3，不计入本记录。
+  `npm run contract` 显式接收了 18.2.8 的路径。
+- 18.2.8 的其他 OS 目标仍未验证。
 
 ## Remaining gates
 
