@@ -139,9 +139,12 @@ Local evidence, not a release declaration.
 The OMP 18.2.8 baseline real contract passed on macOS arm64 / Node 22.22.3
 with the official `omp-darwin-arm64` asset (size and SHA-256 in
 `COMPATIBILITY.md`); other OS targets for 18.2.8 remain unverified. The
-stable-version matrix remains unverified. As of 2026-10-09 the latest stable OMP
-release is 18.8.6 and the previous stable is 18.8.5; neither is installed here,
-and agents must not download OMP. 18.8.4 above is neither row. Required next
+stable-version matrix remains unverified. As of 2026-10-19 the current
+compatibility target is OMP 18.12.2 and the previous stable regression target
+is 18.12.1 (GitHub `can1357/oh-my-pi` releases `v18.12.2` and `v18.12.1`);
+neither is installed here, and agents must not download OMP. The 2026-10-09
+names 18.8.6 and 18.8.5 are not the current target. 18.8.4 above is neither
+row, including when it is the `omp` found on `PATH`. Required next
 evidence includes that matrix, supported OS targets, and native
 background/compaction behavior.
 Independent maintainer review, reproducible release packaging, and public
