@@ -9,8 +9,8 @@ Status: repository candidate; no production OMP version is declared supported ye
 | 18.2.8 | Minimum real-contract baseline for Lody #930 | initialize, new, prompt, cancel, exact load/resume, terminal ordering, restart-safe per-model usage, child failure | Real adapter with a loopback-only model; official release asset `omp-darwin-arm64` (193,484,176 bytes, SHA-256 `cf8d34a7fe6f60de1acbe74f29c82026e4c07888e9d89f7ebceeb922159e5787`). Real contract passed on macOS arm64 / Node 22.22.3; other OS targets not verified |
 | 18.3.1 | Installed local evidence, not a release declaration | Real adapter with a loopback-only model; source and installed package | initialize/new/prompt/cancel/exact load/resume, missing/invalid load, native error, usage attribution, restart scope and notification-before-terminal ordering passed on macOS arm64 / Node 22.22.3 |
 | 18.8.4 | Installed local evidence, not a release declaration | Real adapter with a loopback-only model; independently installed npm archive | Required cases 1–8, including the exact `initialize` capability set, passed on macOS arm64 with Node 26.10.0 and 22.15.0 at adapter commit `39d745a`; see `TESTING.md` |
-| Latest stable | Current compatibility target | Same V1 suite plus schema/behavior diff review | 18.8.6 as of 2026-10-09; not installed or tested |
-| Previous stable | Regression target | Same V1 suite | 18.8.5 as of 2026-10-09; not installed or tested |
+| Latest stable | Current compatibility target | Same V1 suite plus schema/behavior diff review | 18.12.2 as of 2026-10-19 (GitHub `can1357/oh-my-pi` release `v18.12.2`, published 2026-10-18, not draft or prerelease); not installed or tested |
+| Previous stable | Regression target | Same V1 suite | 18.12.1 as of 2026-10-19 (release `v18.12.1`, published 2026-10-17, not draft or prerelease); not installed or tested |
 | Unknown/future | Probe only | Base RPC schema and each optional primitive | Do not infer compatibility from a higher version number |
 
 ## Runtime and release policy
