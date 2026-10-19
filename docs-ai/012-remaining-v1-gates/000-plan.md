@@ -93,3 +93,4 @@ LI-002 的根因是 load 和 resume 都未宣告，Lody 报 `agent_did_not_adver
 ## 修订记录
 
 - 更新于 2026-10-19：当前适配目标定为 OMP 18.12.2，上一稳定版定为 18.12.1；未安装、未测 — 见 [002-latest-omp-target.md](002-latest-omp-target.md)
+- 更新于 2026-10-19：在候选提交 `3258961` 上，OMP 18.12.2 与 18.12.1 的 macOS arm64 smoke、contract 已跑并通过，记录见 [TESTING.md](../../TESTING.md)；二进制为经 TommyWu 明确授权下载的官方 Release 资产。R1 其余范围（其他 OS、原生后台任务、自动 compaction、退出路径）未跑；本计划状态与各门禁勾选不变

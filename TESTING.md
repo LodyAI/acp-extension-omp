@@ -134,18 +134,68 @@ Local evidence, not a release declaration.
   `npm run contract` 显式接收了 18.2.8 的路径。
 - 18.2.8 的其他 OS 目标仍未验证。
 
+### 矩阵记录：OMP 18.12.2 (2026-10-19)
+
+本地证据，不是发布声明。当前适配目标（Latest stable）。
+
+| 字段 | 值 |
+| --- | --- |
+| OMP | 18.12.2，GitHub `can1357/oh-my-pi` 发布 `v18.12.2` 的官方制品 `omp-darwin-arm64`（非 draft、非 prerelease；`--version` 报告 `omp/18.12.2`） |
+| OMP 摘要 | SHA-256 `abd9a5b0fef77f4204078e348e233faa0dd3d5d81719cf2b6a9b9478c10eee48`，196057120 字节（与 GitHub 发布资产记录的 digest 和大小一致） |
+| Node | 22.22.3 (npm 10.9.8) |
+| OS | macOS 27.2 (Darwin 27.2.0) arm64 |
+| 适配器提交 | `3258961f97abf3eb7d8138abaf86b29171a00b68`（`git worktree` 新建的干净工作树，运行前后 `git status` 均为空） |
+| Core | `acp-extension-core` 0.1.8 |
+| 测试配置 | `contract`（smoke：每次运行使用 `lody-smoke-<pid>`），临时 HOME，仅限回环地址的模型 |
+| 被测入口 | 在干净工作树中执行 `npm ci`、`npm run check`（158 项测试通过）和 `npm run build` 后构建的 `dist/index.js` |
+| 结果 | 通过：`npm run smoke` 和 `npm run contract` |
+
+- 制品来源：经 TommyWu 明确授权，由 agent 从官方 Release 下载；摘要与 GitHub 资产记录一致。
+- 必测用例 1–8 使用真实可执行文件运行并通过；用例 1 比对完整的 `initialize` 结果与已审核能力集。
+- 用例 9（子进程失败）由合成测试覆盖（contract 中的 missing/exit/malformed/eof 用例用夹具子进程），
+  不属于本条真实可执行文件记录的覆盖范围。
+- `npm run smoke` 与 `npm run contract` 都以 `argv[3]` 显式接收 18.12.2 的绝对路径；
+  两个 runner 在内部隔离 profile 之后才执行 `omp --version`，未使用 `PATH` shim，
+  也未使用 `PATH` 上的系统 `omp`。
+- 18.12.2 的其他 OS 目标、原生后台任务、自动 compaction 与真实退出路径仍未验证。
+
+### 矩阵记录：OMP 18.12.1 (2026-10-19)
+
+本地证据，不是发布声明。上一稳定版（Previous stable）回归目标。
+
+| 字段 | 值 |
+| --- | --- |
+| OMP | 18.12.1，GitHub `can1357/oh-my-pi` 发布 `v18.12.1` 的官方制品 `omp-darwin-arm64`（非 draft、非 prerelease；`--version` 报告 `omp/18.12.1`） |
+| OMP 摘要 | SHA-256 `fa41b27d434380e99b713e4f9ced0f73eb1fc0c409fdf23a57c119971d24bac5`，195462176 字节（与 GitHub 发布资产记录的 digest 和大小一致） |
+| Node | 22.22.3 (npm 10.9.8) |
+| OS | macOS 27.2 (Darwin 27.2.0) arm64 |
+| 适配器提交 | `3258961f97abf3eb7d8138abaf86b29171a00b68`（同一干净工作树，运行前后 `git status` 均为空） |
+| Core | `acp-extension-core` 0.1.8 |
+| 测试配置 | `contract`（smoke：每次运行使用 `lody-smoke-<pid>`），临时 HOME，仅限回环地址的模型 |
+| 被测入口 | 同上，`npm ci`、`npm run check`（158 项测试通过）和 `npm run build` 后的 `dist/index.js` |
+| 结果 | 通过：`npm run smoke` 和 `npm run contract` |
+
+- 制品来源：经 TommyWu 明确授权，由 agent 从官方 Release 下载；摘要与 GitHub 资产记录一致。
+- 必测用例 1–8 使用真实可执行文件运行并通过。
+- 用例 9 仅由合成测试覆盖，同上。
+- smoke 与 contract 均以 `argv[3]` 显式接收 18.12.1 的绝对路径，未使用 `PATH` shim。
+- 18.12.1 的其他 OS 目标、原生后台任务、自动 compaction 与真实退出路径仍未验证。
+
 ## Remaining gates
 
 The OMP 18.2.8 baseline real contract passed on macOS arm64 / Node 22.22.3
 with the official `omp-darwin-arm64` asset (size and SHA-256 in
 `COMPATIBILITY.md`); other OS targets for 18.2.8 remain unverified. The
-stable-version matrix remains unverified. As of 2026-10-19 the current
-compatibility target is OMP 18.12.2 and the previous stable regression target
-is 18.12.1 (GitHub `can1357/oh-my-pi` releases `v18.12.2` and `v18.12.1`);
-neither is installed here, and agents must not download OMP. The 2026-10-09
+As of 2026-10-19 the current compatibility target is OMP 18.12.2 and the
+previous stable regression target is 18.12.1 (GitHub `can1357/oh-my-pi`
+releases `v18.12.2` and `v18.12.1`). Both passed `npm run smoke` and
+`npm run contract` on macOS arm64 / Node 22.22.3 at adapter commit `3258961`
+with official `omp-darwin-arm64` assets downloaded under explicit maintainer-side
+authorization (records above); other OS targets for both remain unverified.
+Agents still must not download OMP without such authorization. The 2026-10-09
 names 18.8.6 and 18.8.5 are not the current target. 18.8.4 above is neither
 row, including when it is the `omp` found on `PATH`. Required next
-evidence includes that matrix, supported OS targets, and native
+evidence includes supported OS targets for that matrix, and native
 background/compaction behavior.
 Independent maintainer review, reproducible release packaging, and public
 artifact SHA-256/size read-back are separate gates; npm package smoke is not
