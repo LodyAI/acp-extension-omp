@@ -19,21 +19,27 @@
 
 ## 目标
 
-1. 把「已实现」「有证据」「可宣告」「可发布」「Lody 已验收」继续分成独立门禁。
-2. 先让不加垫片的 Lody 会话能够建立，再按顺序补证据和发布动作。
-3. 给工具桥和其余未证明的协议面留出单独入口。
+1. 用户在 Lody 里能直接开对话，并完成下面的基本体验。缺一项，V1 就不能当可用。
+2. 基本体验是：连续文字对话、中途取消、看到本轮计费、fork 出新会话、提交图片、切换模型和标题、看到子 agent 状态、看到仍在后台跑的终端。
+3. 这些能力都要在 OMP 18.12.2 上用真实会话核对。文档里的 RPC 命令名只作线索，不能代替这次核对。
+
+### 用户现在能碰到的
+
+会话一旦建立，文字 prompt 和取消已经能用。OMP 自己的工具输出会跟着消息走。计费数字已经从终端 assistant 用量送到 `_lody/session/usage_update`，但没有宣告 `usage`，Lody 界面上看不到。
+
+在 Lody 里直接新建对话会失败：宿主附带的 MCP 列表被拒绝。`promptText` 遇到非文字块会抛出 `OMP ACP adapter V1 supports text prompts only`，`initialize` 把图片标成 false。模型选项只有当前这一个，没有切换。没有 fork、标题、子 agent 状态，也没有后台终端视图。
 
 ### 非目标
 
-- 不在本阶段增加图片、embedded context、steering、交互式扩展 UI、标题或模型切换。
-- 不实现 MCP 工具桥。R-MCP 只收下宿主的 MCP 列表，不转发给 OMP。
+- 不实现 MCP 工具桥。开对话只要求收下宿主的 MCP 列表，不把 Lody 工具交给 OMP。
+- 不做 steering、embedded context、交互式扩展 UI。
 - 不下载或捆绑 OMP。不改写 `TESTING.md` 的 Required cases。
 - 本文件的 diff 不发布、不打 tag、不改 Lody manifest。tag、发布和 pin 只在 R6，且只在维护者另行授权之后。
 - CI 变绿不等于矩阵通过。不合并 PR #14。PR #15 的图标不算能力验收。
 
 ## 方案
 
-顺序：先核对边界，再做 R-MCP，然后跑矩阵，做本地制品，用临时 mirror 挡住发布，最后才打 tag、回读和 pin。前一阶段没过，不开始会对外承诺的后一阶段。不加垫片的 Lody 试验放在 R-MCP 之后。
+顺序：先核对边界，再让 Lody 能开对话，然后补齐上表里的用户体验，再跑 18.12.2 矩阵。制品、mirror、tag 和 pin 仍在这些体验能用之后。前一阶段没过，不开始会对外承诺的后一阶段。
 
 ### R0 — 核对边界
 
@@ -43,7 +49,23 @@
 
 Lody 在会话有 workspace 和 machine 时，会给 `session/new`、`session/load`、`session/resume` 附上名为 `lody` 的 stdio MCP。现在两道拒绝让不加垫片的会话建不起来。`npm run smoke` 和 `npm run contract` 传空列表，测不到这条。
 
-允许实现之后：`newSession`、`loadSession`、`resumeSession` 接受非空列表，空列表仍可用；列表不进入 OMP 的 `new_session`；继续不宣告 `mcpCapabilities`。`src/server.ts` 的非空拒绝和 `src/connection.ts` 的 `rejectMcp` 一起删除。同一片更新 `AGENTS.md`，写明收下不等于工具桥。合成测试先证明非空列表能建会话，且发出的 `new_session` 不含 MCP。OMP 因此仍调用不了 Lody 的工具。细节见 [003](003-mcp-session-acceptance.md)。
+允许实现之后：`newSession`、`loadSession`、`resumeSession` 接受非空列表，空列表仍可用；列表不进入 OMP 的 `new_session`；继续不宣告 `mcpCapabilities`。`src/server.ts` 的非空拒绝和 `src/connection.ts` 的 `rejectMcp` 一起删除。同一片更新 `AGENTS.md`，写明收下不等于工具桥。合成测试先证明非空列表能建会话，且发出的 `new_session` 不含 MCP。OMP 因此仍调用不了 Lody 的工具。细节见 [003](003-mcp-session-acceptance.md)。没有这一步，后面的计费、fork、图片、模型和标题都无法在 Lody 里体验。
+
+### R-UX — 基本体验
+
+允许实现之后，用户能做这些事。每一项都要宣告对应能力，并在 18.12.2 上留下真实会话记录。当前上游 RPC 文档里的对应命令是线索，落地前要在该版本上核对字段：
+
+| 体验 | 要接到的 OMP 命令 | 现在 |
+| --- | --- | --- |
+| 看到本轮 token 和费用 | 已有的终端 `message_end` 用量 | 已上报，未宣告，界面不可见 |
+| fork 成新会话 | `fork` | 没有 |
+| 提交图片 | `prompt` 的 `images` | 非文字直接拒绝 |
+| 换模型 | `get_available_models`、`set_model` | 只显示当前一个 |
+| 改标题 | `set_session_name` | 没有。RPC 默认关闭自动标题 |
+| 子 agent 状态 | `set_subagent_subscription` 与 `subagent_lifecycle`／`subagent_progress`／`subagent_event` | 没有 |
+| 后台仍在跑的终端 | 后台 bash／async task 在 turn 让出后继续，直到 `session_settled` | 没有独立视图 |
+
+计费还要守住 R2：没有身份的迟到帧不能算进当前这轮。fork、图片、模型、标题、子 agent 和后台终端在核对通过前保持不宣告。
 
 ### R1 — 在候选提交上重跑矩阵
 
@@ -79,7 +101,7 @@ LI-002 随 R3 对 load 和 resume 的决定一起收。LI-003 先在 Lody 界面
 
 | 方案 | 结论 |
 | --- | --- |
-| 证据和发布门禁按上面的顺序走，协议面除 R-MCP 外维持现状 | 采用。 |
+| 先让 Lody 能开对话，再补 R-UX 的用户体验，然后才做矩阵和发布 | 采用。 |
 | 现在合并 PR #14，提前宣告 resume | 不采用。与 `main` 冲突，且早于矩阵和独立审核。 |
 | 会话建立时收下 MCP 列表，但不转发、不宣告、不做工具桥 | 采用。否则不加垫片的 Lody 试验无法开始。见 R-MCP。 |
 | 在本阶段实现 MCP 工具桥 | 不采用。没有宿主工具协议，也没有已审查的 Core 能力。 |
@@ -97,3 +119,4 @@ LI-002 随 R3 对 load 和 resume 的决定一起收。LI-003 先在 Lody 界面
 
 - 更新于 2026-10-19：当前适配目标定为 OMP 18.12.2，上一稳定版定为 18.12.1；未安装、未测 — 见 [002-latest-omp-target.md](002-latest-omp-target.md)
 - 更新于 2026-10-19：正文对齐 002 与 R-MCP。会话建立改为收下 MCP 列表；工具桥仍不做 — 见 [003-mcp-session-acceptance.md](003-mcp-session-acceptance.md)
+- 更新于 2026-10-19：V1 用户底线改为能开对话，并包含计费、fork、图片、换模型、改标题、子 agent 状态和后台终端 — 见 [004-user-visible-floor.md](004-user-visible-floor.md)
