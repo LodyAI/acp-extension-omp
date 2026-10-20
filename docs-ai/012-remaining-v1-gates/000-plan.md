@@ -93,3 +93,4 @@ LI-002 的根因是 load 和 resume 都未宣告，Lody 报 `agent_did_not_adver
 ## 修订记录
 
 - 更新于 2026-10-19：当前适配目标定为 OMP 18.12.2，上一稳定版定为 18.12.1；未安装、未测 — 见 [002-latest-omp-target.md](002-latest-omp-target.md)
+- 更新于 2026-10-19：R-MCP 取代「不做 MCP 桥／不收下列表」里关于会话建立的决定；工具桥仍不做 — 见 [003-mcp-session-acceptance.md](003-mcp-session-acceptance.md)
