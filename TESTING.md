@@ -151,9 +151,9 @@ Local evidence, not a release declaration.
 | 结果 | 通过：`npm run smoke` 和 `npm run contract` |
 
 - 制品来源：经 TommyWu 明确授权，由 agent 从官方 Release 下载；摘要与 GitHub 资产记录一致。
-- 必测用例 1–8 使用真实可执行文件运行并通过；用例 1 比对完整的 `initialize` 结果与已审核能力集。
-- 用例 9（子进程失败）由合成测试覆盖（contract 中的 missing/exit/malformed/eof 用例用夹具子进程），
-  不属于本条真实可执行文件记录的覆盖范围。
+- 真实 OMP 可执行文件跑通了 Required case 的主路径（含用例 1 的完整 `initialize` 与已审核能力集比对，以及基本 usage、load/resume、cancel、invalid/missing identity）。
+- 用例 5 中「valid 但错误 identity」的那一段，以及用例 7 中 duplicate-message / missing-cost 的断言，只由 `scripts/contract.mjs` 的 `syntheticCases()` 经 `fixture.cjs` 覆盖，不是真实 OMP provider 响应；本条矩阵行不得把这两段写成真实 OMP 证据。
+- 用例 9（子进程失败：missing/exit/malformed/eof）同样只由夹具子进程合成覆盖，不属于本条真实可执行文件记录。
 - `npm run smoke` 与 `npm run contract` 都以 `argv[3]` 显式接收 18.12.2 的绝对路径；
   两个 runner 在内部隔离 profile 之后才执行 `omp --version`，未使用 `PATH` shim，
   也未使用 `PATH` 上的系统 `omp`。
@@ -176,8 +176,8 @@ Local evidence, not a release declaration.
 | 结果 | 通过：`npm run smoke` 和 `npm run contract` |
 
 - 制品来源：经 TommyWu 明确授权，由 agent 从官方 Release 下载；摘要与 GitHub 资产记录一致。
-- 必测用例 1–8 使用真实可执行文件运行并通过。
-- 用例 9 仅由合成测试覆盖，同上。
+- 真实 OMP 可执行文件跑通了 Required case 的主路径（范围同 18.12.2 条）。
+- 用例 5 的 wrong-identity 段、用例 7 的 duplicate-message / missing-cost，以及用例 9，仍只由 `syntheticCases()` / 夹具覆盖，不是真实 OMP 证据。
 - smoke 与 contract 均以 `argv[3]` 显式接收 18.12.1 的绝对路径，未使用 `PATH` shim。
 - 18.12.1 的其他 OS 目标、原生后台任务、自动 compaction 与真实退出路径仍未验证。
 
@@ -185,13 +185,14 @@ Local evidence, not a release declaration.
 
 The OMP 18.2.8 baseline real contract passed on macOS arm64 / Node 22.22.3
 with the official `omp-darwin-arm64` asset (size and SHA-256 in
-`COMPATIBILITY.md`); other OS targets for 18.2.8 remain unverified. The
+`COMPATIBILITY.md`); other OS targets for 18.2.8 remain unverified.
 As of 2026-10-19 the current compatibility target is OMP 18.12.2 and the
 previous stable regression target is 18.12.1 (GitHub `can1357/oh-my-pi`
 releases `v18.12.2` and `v18.12.1`). Both passed `npm run smoke` and
 `npm run contract` on macOS arm64 / Node 22.22.3 at adapter commit `3258961`
 with official `omp-darwin-arm64` assets downloaded under explicit maintainer-side
-authorization (records above); other OS targets for both remain unverified.
+authorization (records above); other OS targets remain unverified, and the
+synthetic-only portions of cases 5/7/9 noted in those rows are not real-OMP evidence.
 Agents still must not download OMP without such authorization. The 2026-10-09
 names 18.8.6 and 18.8.5 are not the current target. 18.8.4 above is neither
 row, including when it is the `omp` found on `PATH`. Required next
