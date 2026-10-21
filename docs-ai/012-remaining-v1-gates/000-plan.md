@@ -120,3 +120,4 @@ LI-002 随 R3 对 load 和 resume 的决定一起收。LI-003 先在 Lody 界面
 - 更新于 2026-10-19：当前适配目标定为 OMP 18.12.2，上一稳定版定为 18.12.1；未安装、未测 — 见 [002-latest-omp-target.md](002-latest-omp-target.md)
 - 更新于 2026-10-19：正文对齐 002 与 R-MCP。会话建立改为收下 MCP 列表；工具桥仍不做 — 见 [003-mcp-session-acceptance.md](003-mcp-session-acceptance.md)
 - 更新于 2026-10-19：V1 用户底线改为能开对话，并包含计费、fork、图片、换模型、改标题、子 agent 状态和后台终端 — 见 [004-user-visible-floor.md](004-user-visible-floor.md)
+- 更新于 2026-10-19：R1 在候选提交上补齐 18.12.2／18.12.1 macOS arm64 合同记录（含合成边界说明）— 见 [005-r1-macos-18.12-contract.md](005-r1-macos-18.12-contract.md)
