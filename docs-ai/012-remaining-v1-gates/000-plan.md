@@ -132,3 +132,4 @@ LI-002 随 R3 对 load 和 resume 的决定一起收。LI-003 先在 Lody 界面
 - 更新于 2026-10-25：合成夹具补最小模型目录后，`npm run contract` 在 OMP 18.12.6 macOS arm64 / Node 26.10.0 上恢复通过；工作树不干净，不是矩阵行 — 见 [010-r1-macos-18.12.6-contract.md](010-r1-macos-18.12.6-contract.md)
 - 更新于 2026-10-25：用户追加 OMP 注册为 Lody builtin、日用量可按 agent 查看、当前只改本仓库；记录 Lody 现状与 L1–L4 交接，适配器不改 src、暂不宣告 usage — 见 [012-lody-usage-handoff.md](012-lody-usage-handoff.md)
 - 更新于 2026-10-25：在 `51e1a04` 的干净 `git archive` 导出上，用安装后的 npm 归档入口，以 Node 26.10.0 和 22.15.0 跑通 OMP 18.12.6（与 GitHub Latest 发布资产摘要一致）的 smoke 与 contract；只加已安装本地证据行，不改 Latest/Previous 目标 — 见 [011-r1-macos-18.12.6-clean-matrix.md](011-r1-macos-18.12.6-clean-matrix.md)
+- 更新于 2026-10-25：完成 18.12.2→18.12.6 只读 schema/behavior diff review，RPC wire 合同文件 blob 未变，未见破坏性变化；经独立 reviewer 第一轮允许，Latest stable 改为 18.12.6，Previous stable 改为 18.12.5（未安装、未测、阻塞），18.12.2／18.12.1 转为历史证据 — 见 [013-omp-18.12.6-target-review.md](013-omp-18.12.6-target-review.md)

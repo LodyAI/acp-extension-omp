@@ -136,7 +136,7 @@ Local evidence, not a release declaration.
 
 ### 矩阵记录：OMP 18.12.2 (2026-10-19)
 
-本地证据，不是发布声明。当前适配目标（Latest stable）。
+本地证据，不是发布声明。历史记录：2026-10-19 至 2026-10-25 的适配目标（Latest stable），现由 18.12.6 取代，见 Remaining gates。
 
 | 字段 | 值 |
 | --- | --- |
@@ -161,7 +161,7 @@ Local evidence, not a release declaration.
 
 ### 矩阵记录：OMP 18.12.1 (2026-10-19)
 
-本地证据，不是发布声明。上一稳定版（Previous stable）回归目标。
+本地证据，不是发布声明。历史记录：2026-10-19 至 2026-10-25 的上一稳定版（Previous stable）回归目标，现由 18.12.5 取代，见 Remaining gates。
 
 | 字段 | 值 |
 | --- | --- |
@@ -186,13 +186,21 @@ Local evidence, not a release declaration.
 The OMP 18.2.8 baseline real contract passed on macOS arm64 / Node 22.22.3
 with the official `omp-darwin-arm64` asset (size and SHA-256 in
 `COMPATIBILITY.md`); other OS targets for 18.2.8 remain unverified.
-As of 2026-10-19 the current compatibility target is OMP 18.12.2 and the
-previous stable regression target is 18.12.1 (GitHub `can1357/oh-my-pi`
-releases `v18.12.2` and `v18.12.1`). Both passed `npm run smoke` and
-`npm run contract` on macOS arm64 / Node 22.22.3 at adapter commit `3258961`
-with official `omp-darwin-arm64` assets downloaded under explicit maintainer-side
-authorization (records above); other OS targets remain unverified, and the
-synthetic-only portions of cases 5/7/9 noted in those rows are not real-OMP evidence.
+As of 2026-10-25 the current compatibility target is OMP 18.12.6 and the
+previous stable regression target is 18.12.5 (GitHub `can1357/oh-my-pi`
+releases `v18.12.6` and `v18.12.5`). 18.12.6 passed `npm run smoke` and
+`npm run contract` on macOS arm64 with Node 26.10.0 and 22.15.0 at adapter
+commit `51e1a04` through the installed npm archive; its Required test record
+is `docs-ai/012-remaining-v1-gates/011-r1-macos-18.12.6-clean-matrix.md`, and
+the static schema/behavior diff review is
+`docs-ai/012-remaining-v1-gates/013-omp-18.12.6-target-review.md`. 18.12.5 is
+not installed and not tested; that row is blocked until a maintainer installs
+a binary matching the release digest in `COMPATIBILITY.md`. The 18.12.2 and
+18.12.1 records above (adapter commit `3258961`, Node 22.22.3, official assets
+downloaded under explicit maintainer-side authorization) are historical
+evidence only, not the current target rows. Other OS targets remain
+unverified, and the synthetic-only portions of cases 5/7/9 are not real-OMP
+evidence.
 Agents still must not download OMP without such authorization. The 2026-10-09
 names 18.8.6 and 18.8.5 are not the current target. 18.8.4 above is neither
 row, including when it is the `omp` found on `PATH`. Required next
