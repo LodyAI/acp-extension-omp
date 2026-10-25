@@ -181,6 +181,36 @@ Local evidence, not a release declaration.
 - smoke 与 contract 均以 `argv[3]` 显式接收 18.12.1 的绝对路径，未使用 `PATH` shim。
 - 18.12.1 的其他 OS 目标、原生后台任务、自动 compaction 与真实退出路径仍未验证。
 
+### 矩阵记录：OMP 18.12.6 (2026-10-25)
+
+本地证据，不是发布声明。当前适配目标（Latest stable）。运行细节见 `docs-ai/012-remaining-v1-gates/011-r1-macos-18.12.6-clean-matrix.md`，schema/behavior diff review 见 `docs-ai/012-remaining-v1-gates/013-omp-18.12.6-target-review.md`。
+
+| 字段 | 值 |
+| --- | --- |
+| OMP | 18.12.6，`/opt/homebrew/Cellar/omp/18.12.6/bin/omp`（Homebrew `can1357/tap/omp`，Mach-O arm64；`--version` 报告 `omp/18.12.6`） |
+| OMP 摘要 | SHA-256 `cfbb5e38cd8f8a3be55e710700be587d287deaacdc58c9b0a661c5086bccfe58`，197245984 字节（与 GitHub `can1357/oh-my-pi` 发布 `v18.12.6` 的资产 `omp-darwin-arm64` 记录的 digest 和大小一致） |
+| 发布核对 | `gh release view v18.12.6`：非 draft、非 prerelease，发布于 2026-10-21T21:02:53Z；`gh api .../releases/latest` 返回 `v18.12.6`（截至 2026-10-25） |
+| Node | 26.10.0 (npm 11.19.1) 与 22.15.0 (npm 10.9.2) |
+| OS | macOS 27.0.1 (26A434)，Darwin 27.0.0 arm64 |
+| 适配器提交 | `51e1a04124617491c2b6c7b1b919a56037a36bb4`，由 `git archive 51e1a04` 导出到两个空临时目录（每个工具链一份，`diff -r` 一致；无 `.git`、`node_modules`、`dist` 和未跟踪文件） |
+| Core | `acp-extension-core` 0.1.8 |
+| 测试配置 | `contract`（smoke：每次运行使用 `lody-smoke-<pid>`），runner 自建临时 HOME/USERPROFILE/XDG_*/TMPDIR，仅限回环地址的模型，`auth: none` |
+| 被测入口 | 每份导出各自执行 `npm pack` 生成归档，再用 `npm install --omit=dev --ignore-scripts` 装进路径含空格的独立目录；入口为 `<install dir>/node_modules/acp-extension-omp/dist/index.js` |
+| 结果 | 两个工具链均通过：`npm run smoke` 和 `npm run contract` |
+
+- 每个工具链执行的命令和结果：
+  - `npm ci`：退出 0。
+  - `npm run check`：退出 0，4 个测试文件 373 项通过。
+  - `npm run build`：退出 0。
+  - 两次 `npm pack`：Node 26 两次均为 32161 字节，SHA-256 `ffc06fe551b28b322e19cf60b29f41d9fca7749a60bd090d4ba0ceaf919fc4e5`，15 项；Node 22 两次均为 32543 字节，SHA-256 `a962b1a968796fe2d51d1d6dbee81ac24305e2a49197681f8e4baa9a8ba4b13f`，15 项。两个工具链解包后的 tar 的 SHA-256 一致（`6beb13a8…22e7`），差异只在 gzip 字节。
+  - 安装归档：退出 0。
+  - `node scripts/verify-package.mjs`：退出 0。
+  - `npm run smoke -- "$E" "$OMP"`：退出 0。
+  - `npm run contract -- "$E" "$OMP"`：退出 0。
+- smoke 和 contract 每个工具链只跑一次，都是首次通过，没有重试 prompt。两个 runner 都以 `argv[3]` 显式接收 OMP 的绝对路径，没有使用 `PATH` shim。`npm run contract` 前后 `pgrep -fl "omp --mode rpc"` 都没有结果。
+- 真实 OMP 可执行文件跑通了 Required case 1–8 的主路径（范围同 18.12.2 条）。用例 5 的 wrong-identity 段、用例 7 的 duplicate-message / missing-cost、用例 9，以及夹具里的模型目录，仍只由 `syntheticCases()` / 夹具覆盖，不是真实 OMP 证据。
+- 未验证：其他 OS 与 x64 目标、Windows 下的真实 OMP；原生后台任务；自动 compaction；真实退出路径（进行中的 SIGKILL、工具孙进程）；真实 OMP `get_available_models` 的形状；`51e1a04` 上的 CI 六行结果；独立审核与公开字节回读。上一稳定版 18.12.5 未安装、未测试。
+
 ## Remaining gates
 
 The OMP 18.2.8 baseline real contract passed on macOS arm64 / Node 22.22.3
