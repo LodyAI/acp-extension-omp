@@ -2,9 +2,9 @@
 
 | | |
 | --- | --- |
-| **状态** | 计划中 |
+| **状态** | 计划中；R-MCP、基本F1／I、013、014、M、016、T1已完成各自窄实现、合成验收、独立实现审核及所属文档事实核对，能力仍受原门禁限制；宿主本地用量／标题与存储的源码、合成消费链及所属文档已完成独立审核，但全仓lint仍有未改基线错误；另只读复核18.12.6完整相关源码，仍未取得可解除S-ID／B-STATE／R2的合同，不自动变更获审资格目标；真实OMP／Lody及整体012未完成 |
 | **锚点日期** | 2026-10-19 |
-| **规格核对** | 未核对。起草者不能把本计划标成「已核对」。事实核对通过也不授予实现许可；改 `src/` 之前，非起草者必须另写「允许实现」并点名阶段。 |
+| **规格核对** | 2026-10-24，非起草者 SpecGateReview 两轮独立核对：允许实现 R-MCP，仅限 003 的接受后丢弃；先更新 `AGENTS.md` 再改 `src/`。见 [006](006-r-mcp-implementation.md)。UxSpecRoundOne 两轮核对 [007](007-r-ux-contract.md) 后确认 R0-001 已解除；R0-002 未整体关闭。非起草者 F/I 独立审查者两轮全文核对 [008](008-execution-contract-decisions.md)：仅基本 F1／I 已核对，允许 R-UX-A 未宣告实现；主 Agent 先记录对应消费者 RED，再改 `src/`。基本 F1／I 其后通过合成验收及三轮独立实现审核，FI-Q2-001 已经修正、mutation 实测和第三轮全文复审关闭。2026-10-25 当前局部状态：013、014 独立窄切片已实现并完成各自修后审核；014 的 001／002／003 源码发现经两位非作者最终完整复核关闭，满足 M／T1 的 adapter 前置，历史 SDK 观察仍开放。ModelTitleSpecReviewOne、ModelTitleSpecReviewTwo 已分别全文核对 [015](../015-model-explicit-title/000-plan.md)，明确允许仅 M／T1 未宣告分片实施与各片 N 后置，先 M 后 T1、每片先消费者 RED；N／真实 Lody／R3 最终门禁不删除。M 分片及 [016](../016-acp-close-cause/000-plan.md) 其后完成源码、永久消费者、真实编译合成进程及所属文档验收，两位非作者各完成至少两轮完整实现复核；T1经永久RED1012／compiled before1046后，也已完成当前373根tests／typecheck／build、compiled T1全61及当前M49＋五保留bundle，两位非作者各两轮完整复审findings=[]，仅其未宣告source＋synthetic及所属文档收口，不是真实用户验收。适配器 U-B 切换未获实施许可；宿主本地费用／T-A 与存储完成各自源码、合成消费链、UI 表面及所属文档的独立验收，CLI 的五项 P1 均经当前完整差异复审关闭；全仓 lint 仍有未改基线错误，不记全仓或真实宿主门禁通过。S-ID／B-STATE、R2／N／R1／R3、真实 Lody、R4–R6 均未通过，整个计划仍为「计划中」。 |
 | **相关** | [README](../../README.md)、[兼容矩阵](../../COMPATIBILITY.md)、[测试合同](../../TESTING.md)、[发布门禁](../../RELEASE.md)、[集成归属](../../MIGRATION.md)、[009](../009-late-event-generation/000-plan.md)、[002](002-latest-omp-target.md)、[003](003-mcp-session-acceptance.md) |
 
 ## 背景
@@ -121,3 +121,10 @@ LI-002 随 R3 对 load 和 resume 的决定一起收。LI-003 先在 Lody 界面
 - 更新于 2026-10-19：正文对齐 002 与 R-MCP。会话建立改为收下 MCP 列表；工具桥仍不做 — 见 [003-mcp-session-acceptance.md](003-mcp-session-acceptance.md)
 - 更新于 2026-10-19：V1 用户底线改为能开对话，并包含计费、fork、图片、换模型、改标题、子 agent 状态和后台终端 — 见 [004-user-visible-floor.md](004-user-visible-floor.md)
 - 更新于 2026-10-19：R1 在候选提交上补齐 18.12.2／18.12.1 macOS arm64 合同记录（含合成边界说明）— 见 [005-r1-macos-18.12-contract.md](005-r1-macos-18.12-contract.md)
+- 更新于 2026-10-24：记录 SpecGateReview 两轮 R-MCP 局部许可及消费者回归；不批准其他阶段、不关闭未满足门禁 — 见 [006-r-mcp-implementation.md](006-r-mcp-implementation.md)
+- 更新于 2026-10-24：R-MCP 通过合成验收及两轮独立实现审核，仅关闭该切片的实现审核门禁；真实 Lody 仍待验收 — 见 [006-r-mcp-implementation.md](006-r-mcp-implementation.md)
+- 更新于 2026-10-24：补 R-UX 宿主翻译合同与宣告顺序草案，仍为计划中、未核对，不授权实现 — 见 [007-r-ux-contract.md](007-r-ux-contract.md)
+- 更新于 2026-10-24：007 完成两轮独立文档核对，解除 R0-001 顺序循环；R0-002 设计与目标运行前置仍受阻，不授权 UX 实现 — 见 [007-r-ux-contract.md](007-r-ux-contract.md)
+
+- 更新于 2026-10-24：008 经非起草者两轮全文核对，仅允许基本 F1／I 的 R-UX-A 未宣告实现，先由主 Agent 记录消费者 RED 再改 src；仅窄修订 007 对该两片的 N-before-src。U-B／本地费用／T-A 仅设计核对，不授实施；其余合同、实际兼容、宣告、Lody 与 Release 门禁不变 — 见 [008-execution-contract-decisions.md](008-execution-contract-decisions.md)
+- 更新于 2026-10-24：基本 F1／I 完成未宣告实现、合成验收及三轮独立实现审核；第二轮 FI-Q2-001 已修正并经第三轮完整复审关闭。U/T 仅设计、013 独立计划未实施，其他合同和真实兼容／Lody／宣告／Release 门禁不变，整体 012 仍计划中 — 见 [008-execution-contract-decisions.md](008-execution-contract-decisions.md)
