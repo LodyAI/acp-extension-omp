@@ -128,3 +128,4 @@ LI-002 随 R3 对 load 和 resume 的决定一起收。LI-003 先在 Lody 界面
 
 - 更新于 2026-10-24：008 经非起草者两轮全文核对，仅允许基本 F1／I 的 R-UX-A 未宣告实现，先由主 Agent 记录消费者 RED 再改 src；仅窄修订 007 对该两片的 N-before-src。U-B／本地费用／T-A 仅设计核对，不授实施；其余合同、实际兼容、宣告、Lody 与 Release 门禁不变 — 见 [008-execution-contract-decisions.md](008-execution-contract-decisions.md)
 - 更新于 2026-10-24：基本 F1／I 完成未宣告实现、合成验收及三轮独立实现审核；第二轮 FI-Q2-001 已修正并经第三轮完整复审关闭。U/T 仅设计、013 独立计划未实施，其他合同和真实兼容／Lody／宣告／Release 门禁不变，整体 012 仍计划中 — 见 [008-execution-contract-decisions.md](008-execution-contract-decisions.md)
+- 更新于 2026-10-25：用户裁决子 agent 按原生子 agent ID 统计状态（面板不可行则移出）、后台终端移出 Release 1、计费改为跟随其他内核的 agent 每日用量汇总；不授权改 src — 见 [009-user-scope-decisions.md](009-user-scope-decisions.md)
