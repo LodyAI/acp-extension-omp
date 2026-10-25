@@ -290,11 +290,13 @@ const send = (frame) => process.stdout.write(JSON.stringify(frame) + "\\n");
 if (process.argv.slice(2).join(" ") !== "--mode rpc") process.exit(42);
 const identity = ${JSON.stringify(identity)};
 const mode = process.env.CONTRACT_FIXTURE;
+const model = { provider: "fixture", id: "a", name: "Fixture A" };
 let calls = 0;
 createInterface({ input: process.stdin }).on("line", (line) => {
   const c = JSON.parse(line);
   const reply = (data = {}) => send({ type: "response", id: c.id, command: c.type, success: true, data });
-  if (c.type === "get_state") return reply({ sessionFile: identity });
+  if (c.type === "get_state") return reply({ sessionFile: identity, model });
+  if (c.type === "get_available_models") return reply({ models: [model] });
   if (c.type !== "prompt") return reply();
   reply();
   if (mode === "exit") return process.exit(23);
