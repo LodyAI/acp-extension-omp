@@ -130,3 +130,5 @@ LI-002 随 R3 对 load 和 resume 的决定一起收。LI-003 先在 Lody 界面
 - 更新于 2026-10-24：基本 F1／I 完成未宣告实现、合成验收及三轮独立实现审核；第二轮 FI-Q2-001 已修正并经第三轮完整复审关闭。U/T 仅设计、013 独立计划未实施，其他合同和真实兼容／Lody／宣告／Release 门禁不变，整体 012 仍计划中 — 见 [008-execution-contract-decisions.md](008-execution-contract-decisions.md)
 - 更新于 2026-10-25：用户裁决子 agent 按原生子 agent ID 统计状态（面板不可行则移出）、后台终端移出 Release 1、计费改为跟随其他内核的 agent 每日用量汇总；不授权改 src — 见 [009-user-scope-decisions.md](009-user-scope-decisions.md)
 - 更新于 2026-10-25：合成夹具补最小模型目录后，`npm run contract` 在 OMP 18.12.6 macOS arm64 / Node 26.10.0 上恢复通过；工作树不干净，不是矩阵行 — 见 [010-r1-macos-18.12.6-contract.md](010-r1-macos-18.12.6-contract.md)
+- 更新于 2026-10-25：用户追加 OMP 注册为 Lody builtin、日用量可按 agent 查看、当前只改本仓库；记录 Lody 现状与 L1–L4 交接，适配器不改 src、暂不宣告 usage — 见 [012-lody-usage-handoff.md](012-lody-usage-handoff.md)
+- 更新于 2026-10-25：在 `51e1a04` 的干净 `git archive` 导出上，用安装后的 npm 归档入口，以 Node 26.10.0 和 22.15.0 跑通 OMP 18.12.6（与 GitHub Latest 发布资产摘要一致）的 smoke 与 contract；只加已安装本地证据行，不改 Latest/Previous 目标 — 见 [011-r1-macos-18.12.6-clean-matrix.md](011-r1-macos-18.12.6-clean-matrix.md)
