@@ -130,8 +130,12 @@ export function serve(stream: Stream, options: ServeOptions) {
   let parentFailed = false;
   let closeRequested = false;
   const parentAbort = new AbortController();
-  const parentInput = new TransformStream();
-  void stream.readable.pipeTo(parentInput.writable, { signal: parentAbort.signal }).catch(() => undefined);
+  const parentInput = new TransformStream({
+    flush() {
+      // Decoded EOF is graceful before the SDK can observe done and close itself.
+      if (!parentFailed) closeRequested = true;
+    },
+  });
   const reportParentFailure = (error: Error): void => {
     process.exitCode = 1;
     if (parentFailed) return;
@@ -223,6 +227,10 @@ export function serve(stream: Stream, options: ServeOptions) {
     return closing;
   };
 
+  void stream.readable.pipeTo(parentInput.writable, { signal: parentAbort.signal }).catch((error: unknown) => {
+    abortParent(error instanceof Error ? error : new Error("ACP parent input failed"));
+  });
+
   const connection = new AgentSideConnection((client): Agent => {
     const get = async (directory?: string) => {
       if (closing) throw new Error("ACP connection closed");
@@ -262,11 +270,6 @@ export function serve(stream: Stream, options: ServeOptions) {
       );
       return runtime;
     };
-    const validate = (request: { mcpServers?: unknown[] }) => {
-      if (request.mcpServers?.length) {
-        throw RequestError.invalidRequest(undefined, "OMP ACP adapter V1 does not support MCP servers");
-      }
-    };
     return {
       initialize: async () => ({
         protocolVersion: 1,
@@ -281,23 +284,28 @@ export function serve(stream: Stream, options: ServeOptions) {
         throw RequestError.invalidRequest(undefined, "Authenticate through OMP on the execution machine");
       },
       newSession: async (request) => {
-        validate(request);
         return (await get(request.cwd)).newSession(request);
       },
       resumeSession: async (request) => {
-        validate(request);
         return (await get(request.cwd)).resumeSession(request);
       },
       loadSession: async (request) => {
-        validate(request);
         return (await get(request.cwd)).loadSession(request);
       },
+      unstable_forkSession: async (request) => {
+        return (await get(request.cwd)).forkSession(request);
+      },
+      setSessionConfigOption: async (request) => (await get()).setSessionConfigOption(request),
       prompt: async (request) => (await get()).prompt(request),
       cancel: async (request) => (await get()).cancel(request),
     };
   }, { readable: parentInput.readable, writable: stream.writable });
   connection.signal.addEventListener("abort", () => {
-    void close().catch(() => undefined);
+    if (closeRequested) void close().catch(() => undefined);
+    else {
+      const reason: unknown = connection.signal.reason;
+      abortParent(reason instanceof Error ? reason : new Error("ACP connection closed unexpectedly"));
+    }
   }, { once: true });
   // Second shutdown signal: Node's default exit wins before the grace timer can SIGKILL.
   const forceKill = (): void => {

@@ -49,6 +49,7 @@ function preparationPeer(): Peer {
         const command = JSON.parse(new TextDecoder().decode(bytes)) as Frame;
         received.push(command);
         if (command.type === "get_state") readState(command);
+        else if (command.type === "get_available_models") reply(command, { models: [] });
         else if (command.type === "prompt") {
           reply(command);
           emit({ type: "message_end", messageId: `prep-${++promptSequence}`, message: {
@@ -109,6 +110,16 @@ describe("OMP session preparation", () => {
     await prompt(p, previous.sessionId);
     return { p, target, previous };
   }
+
+  it("keeps a real model-free state and an empty catalog free of invented model configuration", async () => {
+    const p = preparationPeer();
+    peers.push(p);
+    const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    expect(session.sessionId).toBe(p.state.sessionFile);
+    expect(session.configOptions).toEqual([]);
+    await expect(prompt(p, session.sessionId)).resolves.toEqual({ stopReason: "end_turn" });
+    expect(p.usages[0]?.modelUsage?.["fixture/prep-model"]?.inputTokens).toBe(3);
+  });
 
   it.each(operations.flatMap((operation) => (["rejected", "missing", "empty"] as const).map((failure) => ({ operation, failure }))))(
     "$operation get_state $failure invalidates identity and permits verified recovery",
@@ -184,7 +195,13 @@ describe("OMP session preparation", () => {
     async ({ first, second }) => {
       const { p, target, previous } = await setup();
       const prepared = deferred<Frame>();
-      p.setState((command) => prepared.resolve(command));
+      let initialRead = true;
+      p.setState((command) => {
+        if (initialRead) {
+          initialRead = false;
+          prepared.resolve(command);
+        } else p.reply(command, p.state);
+      });
       p.state.sessionFile = target;
       const before = p.received.length;
       const pending = change(p, first, target);
@@ -195,7 +212,7 @@ describe("OMP session preparation", () => {
       p.reply(command, p.state);
       await pending;
       expect(p.received.slice(before).map((value) => value.type)).toEqual([
-        first === "new" ? "new_session" : "switch_session", "get_state",
+        first === "new" ? "new_session" : "switch_session", "get_state", "get_available_models", "get_state",
       ]);
       expect(p.updates).toEqual([]);
       expect(p.usages).toHaveLength(1);
