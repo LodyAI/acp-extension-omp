@@ -2,9 +2,9 @@
 
 | | |
 | --- | --- |
-| **状态** | 计划中；R-MCP、基本F1／I、013、014、M、016、T1已完成各自窄实现、合成验收、独立实现审核及所属文档事实核对，能力仍受原门禁限制；宿主本地用量／标题与存储的源码、合成消费链及所属文档已完成独立审核，但全仓lint仍有未改基线错误；另只读复核18.12.6完整相关源码，仍未取得可解除S-ID／B-STATE／R2的合同，不自动变更获审资格目标；真实OMP／Lody及整体012未完成 |
+| **状态** | 计划中（整体未核对完成）；仅 R-MCP、基本 F1／I 已获局部实施许可并已实现、仍未宣告。013–016 的独立许可与实现见各条目。正文保留历史基线，后续事实更正与证据限制见 [015](015-factual-corrections.md)。 |
 | **锚点日期** | 2026-10-19 |
-| **规格核对** | 2026-10-24，非起草者 SpecGateReview 两轮独立核对：允许实现 R-MCP，仅限 003 的接受后丢弃；先更新 `AGENTS.md` 再改 `src/`。见 [006](006-r-mcp-implementation.md)。UxSpecRoundOne 两轮核对 [007](007-r-ux-contract.md) 后确认 R0-001 已解除；R0-002 未整体关闭。非起草者 F/I 独立审查者两轮全文核对 [008](008-execution-contract-decisions.md)：仅基本 F1／I 已核对，允许 R-UX-A 未宣告实现；主 Agent 先记录对应消费者 RED，再改 `src/`。基本 F1／I 其后通过合成验收及三轮独立实现审核，FI-Q2-001 已经修正、mutation 实测和第三轮全文复审关闭。2026-10-25 当前局部状态：013、014 独立窄切片已实现并完成各自修后审核；014 的 001／002／003 源码发现经两位非作者最终完整复核关闭，满足 M／T1 的 adapter 前置，历史 SDK 观察仍开放。ModelTitleSpecReviewOne、ModelTitleSpecReviewTwo 已分别全文核对 [015](../015-model-explicit-title/000-plan.md)，明确允许仅 M／T1 未宣告分片实施与各片 N 后置，先 M 后 T1、每片先消费者 RED；N／真实 Lody／R3 最终门禁不删除。M 分片及 [016](../016-acp-close-cause/000-plan.md) 其后完成源码、永久消费者、真实编译合成进程及所属文档验收，两位非作者各完成至少两轮完整实现复核；T1经永久RED1012／compiled before1046后，也已完成当前373根tests／typecheck／build、compiled T1全61及当前M49＋五保留bundle，两位非作者各两轮完整复审findings=[]，仅其未宣告source＋synthetic及所属文档收口，不是真实用户验收。适配器 U-B 切换未获实施许可；宿主本地费用／T-A 与存储完成各自源码、合成消费链、UI 表面及所属文档的独立验收，CLI 的五项 P1 均经当前完整差异复审关闭；全仓 lint 仍有未改基线错误，不记全仓或真实宿主门禁通过。S-ID／B-STATE、R2／N／R1／R3、真实 Lody、R4–R6 均未通过，整个计划仍为「计划中」。 |
+| **规格核对** | 2026-10-24 的原记录列出 SpecGateReview 对 R-MCP 的许可、F/I 独立审查者对基本 F1／I 的许可，以及 UxSpecRoundOne、HostContractReview 的设计核对；后两者不授权实现。013–016 的核对分别见各自 `000-plan.md`。本栏只登记局部许可，不表示整体 012 已核对；历史审核及跨仓证据的限制见 [015](015-factual-corrections.md)。 |
 | **相关** | [README](../../README.md)、[兼容矩阵](../../COMPATIBILITY.md)、[测试合同](../../TESTING.md)、[发布门禁](../../RELEASE.md)、[集成归属](../../MIGRATION.md)、[009](../009-late-event-generation/000-plan.md)、[002](002-latest-omp-target.md)、[003](003-mcp-session-acceptance.md) |
 
 ## 背景
@@ -133,3 +133,5 @@ LI-002 随 R3 对 load 和 resume 的决定一起收。LI-003 先在 Lody 界面
 - 更新于 2026-10-25：用户追加 OMP 注册为 Lody builtin、日用量可按 agent 查看、当前只改本仓库；记录 Lody 现状与 L1–L4 交接，适配器不改 src、暂不宣告 usage — 见 [012-lody-usage-handoff.md](012-lody-usage-handoff.md)
 - 更新于 2026-10-25：在 `51e1a04` 的干净 `git archive` 导出上，用安装后的 npm 归档入口，以 Node 26.10.0 和 22.15.0 跑通 OMP 18.12.6（与 GitHub Latest 发布资产摘要一致）的 smoke 与 contract；只加已安装本地证据行，不改 Latest/Previous 目标 — 见 [011-r1-macos-18.12.6-clean-matrix.md](011-r1-macos-18.12.6-clean-matrix.md)
 - 更新于 2026-10-25：完成 18.12.2→18.12.6 只读 schema/behavior diff review，RPC wire 合同文件 blob 未变，未见破坏性变化；经独立 reviewer 第一轮允许，Latest stable 改为 18.12.6，Previous stable 改为 18.12.5（未安装、未测、阻塞），18.12.2／18.12.1 转为历史证据 — 见 [013-omp-18.12.6-target-review.md](013-omp-18.12.6-target-review.md)
+- 更新于 2026-10-26：补记 PR #18 合并时就地改写了本文件正文，按规则本应新开编号；不回写正文 — 见 [014-pr18-in-place-rewrite.md](014-pr18-in-place-rewrite.md)
+- 更新于 2026-10-26：纠正文档时态、证据强度与跨仓归属，保留旧编号正文；整体仍计划中，局部实施许可不扩大 — 见 [015-factual-corrections.md](015-factual-corrections.md)

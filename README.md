@@ -7,11 +7,10 @@ does not bundle OMP, inspect credentials, or persist user session data.
 ## Collaboration status
 
 这是一个可运行的协作分支，不是已发布的 Lody provider，也不是 OMP 兼容性发布。
-本地验证覆盖 macOS arm64 上的 OMP 18.2.8（Node 22.22.3，完整记录见 `TESTING.md`）、
-OMP 18.3.1（Node 22.22.3）和 OMP 18.8.4（Node 26.10.0 和 22.15.0），
-使用仅限回环地址的合成模型运行真实 OMP 合同测试。
+哪些 OMP 版本有真实合同证据、当前目标版本是什么，以 `COMPATIBILITY.md` 为准，
+运行记录见 `TESTING.md`。
 `npm run check` 中的合成回归测试不使用 OMP，
-也不与该证据行绑定；其中一项 stdout-EOF 用例和八项适配器进程用例
+也不与任何证据行绑定；其中一项 stdout-EOF 用例和八项适配器进程用例
 仅在 POSIX 上运行，在 Windows 上跳过。不修改任何生产环境的
 运行时清单。
 
@@ -170,9 +169,8 @@ also accepts an explicit OMP executable:
 npm run contract -- /path/to/installed/dist/index.js /path/to/verified/omp
 ```
 
-本地证据目前覆盖 macOS arm64 上的 OMP 18.2.8、18.3.1 和 18.8.4，包括一个独立安装的
-npm tarball。18.2.8 真实合同已在 macOS arm64 / Node 22.22.3 上通过，其他 OS 目标仍未验证。
-这些证据不证明自动 compaction、任意扩展或真实提供商的质量。剩余关卡见 `TESTING.md`。
+各版本的本地证据见 `COMPATIBILITY.md`。这些证据不证明自动 compaction、任意扩展或真实提供商的质量。
+剩余关卡见 `TESTING.md`。
 
 Locally handled OMP prompts (`agentInvoked: false`) complete without waiting for
 a terminal frame that will never arrive; `/help` completion is exercised by the

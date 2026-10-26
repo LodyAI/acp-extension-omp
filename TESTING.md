@@ -185,6 +185,8 @@ Local evidence, not a release declaration.
 
 本地证据，不是发布声明。当前适配目标（Latest stable）。运行细节见 `docs-ai/012-remaining-v1-gates/011-r1-macos-18.12.6-clean-matrix.md`，schema/behavior diff review 见 `docs-ai/012-remaining-v1-gates/013-omp-18.12.6-target-review.md`。
 
+上述历史记录的后续更正见 [012.015](docs-ai/012-remaining-v1-gates/015-factual-corrections.md)：运行细节、静态审查与历史审核摘要分别保留，不能由提交 diff 补证缺失的审核过程。
+
 | 字段 | 值 |
 | --- | --- |
 | OMP | 18.12.6，`/opt/homebrew/Cellar/omp/18.12.6/bin/omp`（Homebrew `can1357/tap/omp`，Mach-O arm64；`--version` 报告 `omp/18.12.6`） |
@@ -208,8 +210,8 @@ Local evidence, not a release declaration.
   - `npm run smoke -- "$E" "$OMP"`：退出 0。
   - `npm run contract -- "$E" "$OMP"`：退出 0。
 - smoke 和 contract 每个工具链只跑一次，都是首次通过，没有重试 prompt。两个 runner 都以 `argv[3]` 显式接收 OMP 的绝对路径，没有使用 `PATH` shim。`npm run contract` 前后 `pgrep -fl "omp --mode rpc"` 都没有结果。
-- 真实 OMP 可执行文件跑通了 Required case 1–8 的主路径（范围同 18.12.2 条）。用例 5 的 wrong-identity 段、用例 7 的 duplicate-message / missing-cost、用例 9，以及夹具里的模型目录，仍只由 `syntheticCases()` / 夹具覆盖，不是真实 OMP 证据。
-- 未验证：其他 OS 与 x64 目标、Windows 下的真实 OMP；原生后台任务；自动 compaction；真实退出路径（进行中的 SIGKILL、工具孙进程）；真实 OMP `get_available_models` 的形状；`51e1a04` 上的 CI 六行结果；独立审核与公开字节回读。上一稳定版 18.12.5 未安装、未测试。
+- 真实 OMP 可执行文件跑通了 Required case 1–8 的主路径（范围同 18.12.2 条）。用例 5 的 wrong-identity 段、用例 7 的 duplicate-message / missing-cost、用例 9，以及合成夹具的固定模型目录回复，仍只由 `syntheticCases()` / 夹具覆盖。真实会话准备也会调用 `get_available_models` 并校验响应，但这不等于验证完整目录内容或模型切换合同。
+- 未验证：其他 OS 与 x64 目标、Windows 下的真实 OMP；原生后台任务；自动 compaction；真实退出路径（进行中的 SIGKILL、工具孙进程）；真实模型目录完整性及模型 A→B→A 切换；`51e1a04` 上的 CI 六行结果；独立审核与公开字节回读。上一稳定版 18.12.5 未安装、未测试。
 
 ## Remaining gates
 
@@ -221,7 +223,8 @@ previous stable regression target is 18.12.5 (GitHub `can1357/oh-my-pi`
 releases `v18.12.6` and `v18.12.5`). 18.12.6 passed `npm run smoke` and
 `npm run contract` on macOS arm64 with Node 26.10.0 and 22.15.0 at adapter
 commit `51e1a04` through the installed npm archive; its Required test record
-is `docs-ai/012-remaining-v1-gates/011-r1-macos-18.12.6-clean-matrix.md`, and
+is the 18.12.6 matrix record above (run details in
+`docs-ai/012-remaining-v1-gates/011-r1-macos-18.12.6-clean-matrix.md`), and
 the static schema/behavior diff review is
 `docs-ai/012-remaining-v1-gates/013-omp-18.12.6-target-review.md`. 18.12.5 is
 not installed and not tested; that row is blocked until a maintainer installs
