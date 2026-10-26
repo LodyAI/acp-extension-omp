@@ -64,7 +64,9 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
   const command = JSON.parse(line);
   const data = command.type === "get_state"
     ? { sessionFile: "/tmp/fake-omp-session.jsonl", model: { provider: "fixture", id: "model", name: "Fixture" } }
-    : {};
+    : command.type === "get_available_models"
+      ? { models: [{ provider: "fixture", id: "model", name: "Fixture" }] }
+      : {};
   process.stdout.write(JSON.stringify({ type: "response", id: command.id, command: command.type, success: true, data }) + "\\n");
 });
 `, "utf8");

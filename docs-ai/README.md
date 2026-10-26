@@ -182,3 +182,8 @@
 - [009 — 迟到事件归属与会话准备](009-late-event-generation/000-plan.md) — 2026-10-18：按可证明消息来源隔离迟到帧，补准备失败与并发证据
 - [011 — 通知失败及时关闭](011-notification-failure/000-plan.md) — 2026-10-17：通知发送失败立即关闭 RPC／ACP，解除 ACK 等待并回收 OMP
 - [012 — V1 剩余门禁](012-remaining-v1-gates/000-plan.md) — 2026-10-19：用户底线是能开对话，并有计费、fork、图片、模型、标题、子 agent 和后台终端
+- [013 — 不丢失已 yield 后 root 终态](013-held-root-yield-outcome/000-plan.md) — 2026-10-24：持有 prompt 的后续真实 root error/aborted 聚合，保留 settlement、通知排空与既有 abort 映射
+- [014 — 本地处理后的精确 sessionFile 重新核实](014-post-local-session-identity/000-plan.md) — 2026-10-24：本地完成前重新核实原 ACP 文件身份；不明或改变则失败并失效旧身份，不自动迁移
+- [015 — 模型配置 M 与显式标题 T1](015-model-explicit-title/000-plan.md) — 2026-10-25：标准模型 config 与内部显式 rename，保留精确身份、读回、取消顺序及独立真实门禁
+- [016 — ACP 关闭原因与失败退出分类](016-acp-close-cause/000-plan.md) — 2026-10-25：区分正常父 EOF／显式关闭与真实 ACP 输出或 SDK 故障，保持失败分类、幂等回收和原信号退出语义
+- [017 — 按原生子 agent ID 统计子 agent 状态](017-subagent-status-by-id/000-plan.md) — 2026-10-25：核实 Lody 面板对同一 taskId 的 follow-up 终态单调、旧 turn 归属与取消绑定，结论不可行，建议按 012.009 移出 Release 1；保留获准后的映射、取消与宣告合同

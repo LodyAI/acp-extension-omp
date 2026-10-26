@@ -2,9 +2,9 @@
 
 | | |
 | --- | --- |
-| **状态** | 计划中 |
+| **状态** | 计划中（整体未核对完成）；仅 R-MCP、基本 F1／I 已获局部实施许可并已实现、仍未宣告。013–016 的独立许可与实现见各条目。正文保留历史基线，后续事实更正与证据限制见 [015](015-factual-corrections.md)。 |
 | **锚点日期** | 2026-10-19 |
-| **规格核对** | 未核对。起草者不能把本计划标成「已核对」。事实核对通过也不授予实现许可；改 `src/` 之前，非起草者必须另写「允许实现」并点名阶段。 |
+| **规格核对** | 2026-10-24 的原记录列出 SpecGateReview 对 R-MCP 的许可、F/I 独立审查者对基本 F1／I 的许可，以及 UxSpecRoundOne、HostContractReview 的设计核对；后两者不授权实现。013–016 的核对分别见各自 `000-plan.md`。本栏只登记局部许可，不表示整体 012 已核对；历史审核及跨仓证据的限制见 [015](015-factual-corrections.md)。 |
 | **相关** | [README](../../README.md)、[兼容矩阵](../../COMPATIBILITY.md)、[测试合同](../../TESTING.md)、[发布门禁](../../RELEASE.md)、[集成归属](../../MIGRATION.md)、[009](../009-late-event-generation/000-plan.md)、[002](002-latest-omp-target.md)、[003](003-mcp-session-acceptance.md) |
 
 ## 背景
@@ -121,3 +121,17 @@ LI-002 随 R3 对 load 和 resume 的决定一起收。LI-003 先在 Lody 界面
 - 更新于 2026-10-19：正文对齐 002 与 R-MCP。会话建立改为收下 MCP 列表；工具桥仍不做 — 见 [003-mcp-session-acceptance.md](003-mcp-session-acceptance.md)
 - 更新于 2026-10-19：V1 用户底线改为能开对话，并包含计费、fork、图片、换模型、改标题、子 agent 状态和后台终端 — 见 [004-user-visible-floor.md](004-user-visible-floor.md)
 - 更新于 2026-10-19：R1 在候选提交上补齐 18.12.2／18.12.1 macOS arm64 合同记录（含合成边界说明）— 见 [005-r1-macos-18.12-contract.md](005-r1-macos-18.12-contract.md)
+- 更新于 2026-10-24：记录 SpecGateReview 两轮 R-MCP 局部许可及消费者回归；不批准其他阶段、不关闭未满足门禁 — 见 [006-r-mcp-implementation.md](006-r-mcp-implementation.md)
+- 更新于 2026-10-24：R-MCP 通过合成验收及两轮独立实现审核，仅关闭该切片的实现审核门禁；真实 Lody 仍待验收 — 见 [006-r-mcp-implementation.md](006-r-mcp-implementation.md)
+- 更新于 2026-10-24：补 R-UX 宿主翻译合同与宣告顺序草案，仍为计划中、未核对，不授权实现 — 见 [007-r-ux-contract.md](007-r-ux-contract.md)
+- 更新于 2026-10-24：007 完成两轮独立文档核对，解除 R0-001 顺序循环；R0-002 设计与目标运行前置仍受阻，不授权 UX 实现 — 见 [007-r-ux-contract.md](007-r-ux-contract.md)
+
+- 更新于 2026-10-24：008 经非起草者两轮全文核对，仅允许基本 F1／I 的 R-UX-A 未宣告实现，先由主 Agent 记录消费者 RED 再改 src；仅窄修订 007 对该两片的 N-before-src。U-B／本地费用／T-A 仅设计核对，不授实施；其余合同、实际兼容、宣告、Lody 与 Release 门禁不变 — 见 [008-execution-contract-decisions.md](008-execution-contract-decisions.md)
+- 更新于 2026-10-24：基本 F1／I 完成未宣告实现、合成验收及三轮独立实现审核；第二轮 FI-Q2-001 已修正并经第三轮完整复审关闭。U/T 仅设计、013 独立计划未实施，其他合同和真实兼容／Lody／宣告／Release 门禁不变，整体 012 仍计划中 — 见 [008-execution-contract-decisions.md](008-execution-contract-decisions.md)
+- 更新于 2026-10-25：用户裁决子 agent 按原生子 agent ID 统计状态（面板不可行则移出）、后台终端移出 Release 1、计费改为跟随其他内核的 agent 每日用量汇总；不授权改 src — 见 [009-user-scope-decisions.md](009-user-scope-decisions.md)
+- 更新于 2026-10-25：合成夹具补最小模型目录后，`npm run contract` 在 OMP 18.12.6 macOS arm64 / Node 26.10.0 上恢复通过；工作树不干净，不是矩阵行 — 见 [010-r1-macos-18.12.6-contract.md](010-r1-macos-18.12.6-contract.md)
+- 更新于 2026-10-25：用户追加 OMP 注册为 Lody builtin、日用量可按 agent 查看、当前只改本仓库；记录 Lody 现状与 L1–L4 交接，适配器不改 src、暂不宣告 usage — 见 [012-lody-usage-handoff.md](012-lody-usage-handoff.md)
+- 更新于 2026-10-25：在 `51e1a04` 的干净 `git archive` 导出上，用安装后的 npm 归档入口，以 Node 26.10.0 和 22.15.0 跑通 OMP 18.12.6（与 GitHub Latest 发布资产摘要一致）的 smoke 与 contract；只加已安装本地证据行，不改 Latest/Previous 目标 — 见 [011-r1-macos-18.12.6-clean-matrix.md](011-r1-macos-18.12.6-clean-matrix.md)
+- 更新于 2026-10-25：完成 18.12.2→18.12.6 只读 schema/behavior diff review，RPC wire 合同文件 blob 未变，未见破坏性变化；经独立 reviewer 第一轮允许，Latest stable 改为 18.12.6，Previous stable 改为 18.12.5（未安装、未测、阻塞），18.12.2／18.12.1 转为历史证据 — 见 [013-omp-18.12.6-target-review.md](013-omp-18.12.6-target-review.md)
+- 更新于 2026-10-26：补记 PR #18 合并时就地改写了本文件正文，按规则本应新开编号；不回写正文 — 见 [014-pr18-in-place-rewrite.md](014-pr18-in-place-rewrite.md)
+- 更新于 2026-10-26：纠正文档时态、证据强度与跨仓归属，保留旧编号正文；整体仍计划中，局部实施许可不扩大 — 见 [015-factual-corrections.md](015-factual-corrections.md)

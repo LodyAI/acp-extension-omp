@@ -7,7 +7,7 @@
 - 原生会话身份必须是精确的 OMP `sessionFile`。缺失或被换成另一个身份时拒绝。不要创建空的回退会话。
 - 终端 OMP abort 映射为 ACP 取消。EOF 或子进程退出使进行中的工作失败。不要合成成功，也不要重试 prompt。
 - 用量只来自终端 assistant 的 `message.usage`，经 `SessionUsageAccumulator`。省略的 cost 仍为未知。
-- 不要宣告未实现的控制。在有协议证明的 host-tool 桥和已审查的 Core 能力之前，拒绝 MCP 配置。
+- 不要宣告未实现的控制。ACP 会话入口可以收下宿主给的 MCP 列表，但绝不转发给 OMP、不宣告 MCP 能力，也不代表工具桥。在有协议证明的 host-tool 桥和已审查的 Core 能力之前，仍不做桥。
 - 测试和 smoke 只用合成夹具，或隔离的 profile / 本地端点。不要捕获用户会话、凭据或付费提供商数据。
 
 文档用中文写。协议名、命令、文件路径和代码标识保持原文。
