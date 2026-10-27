@@ -238,10 +238,6 @@ with the official `omp-darwin-arm64` asset (size and SHA-256 in
 均经安装后入口在 macOS arm64 / Node 22.22.3 上跑通 smoke + contract，
 完整记录见 [016](docs-ai/012-remaining-v1-gates/016-r1-macos-f0572cd-tip-matrix.md)。
 
-### 真实 provider 旁证：openai-codex/gpt-6.1-sol，tip f0572cd (2026-10-26)
-
-本地证据，不是发布声明。同一 tip／安装后入口／OMP 18.12.6／Node 22.22.3，真实 `HOME` oauth，仓外 harness 跑通 baseline prompt+usage、cancel、exact load/resume、fork、title、image 等；**不**关闭 R2／R3–R6，**不**替换 loopback 矩阵行，用例 5／7／9 仍合成。见 [012.017](docs-ai/012-remaining-v1-gates/017-r1-macos-real-openai-codex-gpt-6.1-sol.md)；机器摘要 `/tmp/acp-omp-real-61sol-evidence.json`（本机路径，不入库）。续跑同文件：H′ 真实 SIGKILL 进程组收尸 **pass**；tool-cancel **skip**；Lody no-shim e2e **blocked**（不关闭 R5）。再续：合作式 cancel→原生 abort ACK **pass**；J′ native tool 中取消 **pass**（ACP tool_call 未转发）。
-
 Previous「未安装、未测」阻塞仅就该本机行解除，不等于批准的完整矩阵或 Release 1 完成。
 18.12.2／18.12.1（`3258961`）和 18.8.4 均为历史证据，不能代替当前目标行；
 本轮没有重跑 Node 26。其他 OS 仍未验证，用例 5/7/9 的合成部分仍不是真实 OMP 证据。
