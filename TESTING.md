@@ -211,34 +211,38 @@ Local evidence, not a release declaration.
   - `npm run contract -- "$E" "$OMP"`：退出 0。
 - smoke 和 contract 每个工具链只跑一次，都是首次通过，没有重试 prompt。两个 runner 都以 `argv[3]` 显式接收 OMP 的绝对路径，没有使用 `PATH` shim。`npm run contract` 前后 `pgrep -fl "omp --mode rpc"` 都没有结果。
 - 真实 OMP 可执行文件跑通了 Required case 1–8 的主路径（范围同 18.12.2 条）。用例 5 的 wrong-identity 段、用例 7 的 duplicate-message / missing-cost、用例 9，以及合成夹具的固定模型目录回复，仍只由 `syntheticCases()` / 夹具覆盖。真实会话准备也会调用 `get_available_models` 并校验响应，但这不等于验证完整目录内容或模型切换合同。
-- 未验证：其他 OS 与 x64 目标、Windows 下的真实 OMP；原生后台任务；自动 compaction；真实退出路径（进行中的 SIGKILL、工具孙进程）；真实模型目录完整性及模型 A→B→A 切换；`51e1a04` 上的 CI 六行结果；独立审核与公开字节回读。上一稳定版 18.12.5 未安装、未测试。
+- 未验证（该历史运行时）：其他 OS 与 x64 目标、Windows 下的真实 OMP；原生后台任务；自动 compaction；真实退出路径（进行中的 SIGKILL、工具孙进程）；真实模型目录完整性及模型 A→B→A 切换；`51e1a04` 上的 CI 六行结果；独立审核与公开字节回读。当时上一稳定版 18.12.5 未安装、未测试；后续 tip 的本机回归见下节 016，不回写本条历史结果。
+
+### 矩阵记录：OMP 18.12.6／18.12.5，tip f0572cd (2026-10-26)
+
+本地证据，不是发布声明。本轮由 TommyWu 提供已在本机跑通的结果，文档编辑未重跑；Required test record 与运行范围见 [012.016](docs-ai/012-remaining-v1-gates/016-r1-macos-f0572cd-tip-matrix.md)。
+
+- 适配器：`f0572cd904b88f9d80101d9b32ec7d5bffe1b6d1`（`origin/main`／PR #19 merge）；Node v22.22.3 / npm 10.9.8 / Darwin 27.2.0 arm64，Core 0.1.8。
+- 干净 worktree 的 `npm ci --ignore-scripts && npm run check`：4 files / 373 tests 通过；`npm run build` 通过。从该 tip `npm pack`，安装到含空格路径的独立目录，使用安装后的 `dist/index.js`。
+- tgz SHA-256 `e92db722d0983295546ed647e8f2a894819b3e843a6704c581fdf146d226b6d8`，约 34651 bytes，15 files；不据此宣称完成两次构建的可复现性验收。
+- Latest 18.12.6：`~/.local/bin/omp`，SHA-256 `cfbb5e38cd8f8a3be55e710700be587d287deaacdc58c9b0a661c5086bccfe58`，197245984 bytes；smoke + contract 通过。
+- Previous 18.12.5：官方 Release 资产 `omp-darwin-arm64`，SHA-256 `5e50df9879de9165d5c6df5e48bb5d038737270013cd849e189da7774fb7368b`，197113888 bytes（与 `SHA256SUMS` 一致）；smoke + contract 通过。
+- 两行均为 isolated profile／loopback-only model。用例 5 wrong-identity、用例 7 duplicate-message／missing-cost、用例 9 仍是 synthetic／fixture，不是真实 OMP provider 证据。
+- Previous 的本机行阻塞已解除；其他 OS、R2、R3–R6、真实 Lody e2e、独立审核签字仍未完成，Node 26 本轮未重跑。`51e1a04` 的历史记录保留。
 
 ## Remaining gates
 
 The OMP 18.2.8 baseline real contract passed on macOS arm64 / Node 22.22.3
 with the official `omp-darwin-arm64` asset (size and SHA-256 in
 `COMPATIBILITY.md`); other OS targets for 18.2.8 remain unverified.
-As of 2026-10-25 the current compatibility target is OMP 18.12.6 and the
-previous stable regression target is 18.12.5 (GitHub `can1357/oh-my-pi`
-releases `v18.12.6` and `v18.12.5`). 18.12.6 passed `npm run smoke` and
-`npm run contract` on macOS arm64 with Node 26.10.0 and 22.15.0 at adapter
-commit `51e1a04` through the installed npm archive; its Required test record
-is the 18.12.6 matrix record above (run details in
-`docs-ai/012-remaining-v1-gates/011-r1-macos-18.12.6-clean-matrix.md`), and
-the static schema/behavior diff review is
-`docs-ai/012-remaining-v1-gates/013-omp-18.12.6-target-review.md`. 18.12.5 is
-not installed and not tested; that row is blocked until a maintainer installs
-a binary matching the release digest in `COMPATIBILITY.md`. The 18.12.2 and
-18.12.1 records above (adapter commit `3258961`, Node 22.22.3, official assets
-downloaded under explicit maintainer-side authorization) are historical
-evidence only, not the current target rows. Other OS targets remain
-unverified, and the synthetic-only portions of cases 5/7/9 are not real-OMP
-evidence.
-Agents still must not download OMP without such authorization. The 2026-10-09
-names 18.8.6 and 18.8.5 are not the current target. 18.8.4 above is neither
-row, including when it is the `omp` found on `PATH`. Required next
-evidence includes supported OS targets for that matrix, and native
-background/compaction behavior.
+当前兼容目标仍为 OMP 18.12.6，Previous stable 回归目标仍为 18.12.5；
+版本选择及静态 schema/behavior diff review 见
+`docs-ai/012-remaining-v1-gates/013-omp-18.12.6-target-review.md`。
+18.12.6 在 `51e1a04`、Node 26.10.0／22.15.0 上的安装后归档运行保留为历史证据，
+运行细节见 011。2026-10-26 的 tip `f0572cd` 上，18.12.6 与 18.12.5
+均经安装后入口在 macOS arm64 / Node 22.22.3 上跑通 smoke + contract，
+完整记录见 [016](docs-ai/012-remaining-v1-gates/016-r1-macos-f0572cd-tip-matrix.md)。
+
+Previous「未安装、未测」阻塞仅就该本机行解除，不等于批准的完整矩阵或 Release 1 完成。
+18.12.2／18.12.1（`3258961`）和 18.8.4 均为历史证据，不能代替当前目标行；
+本轮没有重跑 Node 26。其他 OS 仍未验证，用例 5/7/9 的合成部分仍不是真实 OMP 证据。
+agent 不得未经授权下载 OMP。后续仍需批准矩阵的其他平台，以及原生
+background／compaction 和真实退出路径的证据；R2、R3–R6 与 Lody pin 均未通过。
 Independent maintainer review, reproducible release packaging, and public
 artifact SHA-256/size read-back are separate gates; npm package smoke is not
 evidence that Lody's managed-runtime download/install pipeline has passed.

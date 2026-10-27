@@ -135,3 +135,4 @@ LI-002 随 R3 对 load 和 resume 的决定一起收。LI-003 先在 Lody 界面
 - 更新于 2026-10-25：完成 18.12.2→18.12.6 只读 schema/behavior diff review，RPC wire 合同文件 blob 未变，未见破坏性变化；经独立 reviewer 第一轮允许，Latest stable 改为 18.12.6，Previous stable 改为 18.12.5（未安装、未测、阻塞），18.12.2／18.12.1 转为历史证据 — 见 [013-omp-18.12.6-target-review.md](013-omp-18.12.6-target-review.md)
 - 更新于 2026-10-26：补记 PR #18 合并时就地改写了本文件正文，按规则本应新开编号；不回写正文 — 见 [014-pr18-in-place-rewrite.md](014-pr18-in-place-rewrite.md)
 - 更新于 2026-10-26：纠正文档时态、证据强度与跨仓归属，保留旧编号正文；整体仍计划中，局部实施许可不扩大 — 见 [015-factual-corrections.md](015-factual-corrections.md)
+- 更新于 2026-10-26：tip `f0572cd` 的安装后入口在 macOS arm64 / Node 22.22.3 上跑通 18.12.6／18.12.5 smoke + contract，Previous 本机行阻塞解除；整体仍计划中，其他平台、合成边界、R2／R3–R6 与独立审核仍未关闭 — 见 [016-r1-macos-f0572cd-tip-matrix.md](016-r1-macos-f0572cd-tip-matrix.md)
