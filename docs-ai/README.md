@@ -187,3 +187,4 @@
 - [015 — 模型配置 M 与显式标题 T1](015-model-explicit-title/000-plan.md) — 2026-10-25：标准模型 config 与内部显式 rename，保留精确身份、读回、取消顺序及独立真实门禁
 - [016 — ACP 关闭原因与失败退出分类](016-acp-close-cause/000-plan.md) — 2026-10-25：区分正常父 EOF／显式关闭与真实 ACP 输出或 SDK 故障，保持失败分类、幂等回收和原信号退出语义
 - [017 — 按原生子 agent ID 统计子 agent 状态](017-subagent-status-by-id/000-plan.md) — 2026-10-25：核实 Lody 面板对同一 taskId 的 follow-up 终态单调、旧 turn 归属与取消绑定，结论不可行，建议按 012.009 移出 Release 1；保留获准后的映射、取消与宣告合同
+- [018 — 跨助手消息的段落分隔](018-assistant-message-breaks/000-plan.md) — 2026-11-07：不同 OMP 助手消息的文本之间加 `\n\n`，避免宿主拼成一整段；计划中，实现草案待核对

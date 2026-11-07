@@ -385,6 +385,47 @@ describe("OMP RPC connection", () => {
     });
   });
 
+  it("separates text from consecutive assistant messages with a paragraph break", async () => {
+    const p = peer();
+    peers.push(p);
+    const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    const text = (messageId: string, delta: string) => ({
+      type: "message_update",
+      messageId,
+      message: { role: "assistant" },
+      assistantMessageEvent: { type: "text_delta", delta },
+    });
+    let turn = 0;
+    p.setPrompt((command) => {
+      p.reply(command, {});
+      turn += 1;
+      if (turn === 1) {
+        p.emit(text("assistant-1", "Reading files."));
+        p.emit(text("assistant-1", " Then checking."));
+        p.emit({ type: "message_update", messageId: "assistant-2", message: { role: "assistant" }, assistantMessageEvent: { type: "toolcall_start" } });
+        p.emit(text("assistant-2", "Done."));
+        p.emit({
+          type: "message_update",
+          message: { role: "assistant", responseId: "legacy-3" },
+          assistantMessageEvent: { type: "text_delta", delta: "Legacy." },
+        });
+      } else {
+        p.emit(text("assistant-4", "Next turn."));
+      }
+      p.emit({ type: "prompt_result", id: command.id, agentInvoked: true, status: "completed", sessionSettled: true });
+    });
+    for (const prompt of ["first", "second"]) {
+      await expect(
+        p.connection.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: prompt }] })
+      ).resolves.toEqual({ stopReason: "end_turn" });
+    }
+    expect(
+      p.updates.flatMap(({ update }) =>
+        update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" ? [update.content.text] : []
+      )
+    ).toEqual(["Reading files.", " Then checking.", "\n\nDone.", "\n\nLegacy.", "Next turn."]);
+  });
+
   it("finishes a locally handled prompt without waiting for a nonexistent terminal frame", async () => {
     const p = peer();
     peers.push(p);

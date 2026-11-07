@@ -58,6 +58,7 @@ type ActivePrompt = {
   pendingLegacyCancel?: boolean;
   commandFailure?: Error;
   outcome?: "completed" | "aborted" | "error";
+  textMessageKey?: string;
 };
 
 type TitleControl = {
@@ -166,6 +167,14 @@ const legacyAssistantUsageFrameSchema = z.object({
 const textMessageUpdateFrameSchema = z.object({
   assistantMessageEvent: z.object({ type: z.literal("text_delta"), delta: z.string().min(1) }),
 });
+
+function assistantMessageKey(frame: Record<string, unknown>): string | undefined {
+  if (typeof frame.messageId === "string" && frame.messageId) return `message:${frame.messageId}`;
+  const message = frame.message;
+  const responseId =
+    message !== null && typeof message === "object" ? (message as Record<string, unknown>).responseId : undefined;
+  return typeof responseId === "string" && responseId ? `response:${responseId}` : undefined;
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -752,12 +761,21 @@ export class OmpRpcConnection {
     const parsed = textMessageUpdateFrameSchema.safeParse(frame);
     if (!parsed.success) return;
     const sessionId = this.sessionId;
+    const active = this.active;
+    // OMP narrates between tool calls as separate assistant messages, but ACP text
+    // chunks carry no message boundary; without a break the host renders one run-on paragraph.
+    const messageKey = assistantMessageKey(frame);
+    const separator =
+      messageKey !== undefined && active.textMessageKey !== undefined && messageKey !== active.textMessageKey
+        ? "\n\n"
+        : "";
+    if (messageKey !== undefined) active.textMessageKey = messageKey;
     this.enqueueNotification(() =>
       this.host.update({
         sessionId,
         update: {
           sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: parsed.data.assistantMessageEvent.delta },
+          content: { type: "text", text: separator + parsed.data.assistantMessageEvent.delta },
         },
       })
     );
