@@ -20,7 +20,7 @@ Status: repository candidate; no production OMP version is declared supported ye
 ## Runtime and release policy
 
 Version strings record evidence; they do not prove protocol compatibility.
-The candidate withholds optional load/resume/usage capability advertisements
+The candidate advertises Lody usage and withholds optional load/resume capability advertisements
 until the baseline matrix and independent review pass. Explicit contract-runner
 calls still exercise those implementation paths.
 

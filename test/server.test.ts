@@ -668,6 +668,7 @@ describe("015 model config ACP consumer", () => {
       });
       expect(initialized.agentCapabilities).toEqual({
         promptCapabilities: { image: false, embeddedContext: false },
+        _meta: { lody: { usage: { version: 1 } } },
       });
       const session = await withTimeout(client.request<acp.NewSessionResponse>("session/new", {
         cwd: directory, mcpServers: [],
@@ -928,11 +929,14 @@ describe("OMP ACP server lifecycle", () => {
         protocolVersion: 1,
         clientCapabilities: {},
       });
-      // Exact match: an optional capability (load, resume, MCP, images, context) must not appear unreviewed.
+      // Exact match: only usage is advertised; load, resume, MCP, images and context must not appear unreviewed.
       expect(initialized).toEqual({
         protocolVersion: 1,
         agentInfo: { name: "omp-rpc", version: packageJson.version },
-        agentCapabilities: { promptCapabilities: { image: false, embeddedContext: false } },
+        agentCapabilities: {
+          promptCapabilities: { image: false, embeddedContext: false },
+          _meta: { lody: { usage: { version: 1 } } },
+        },
         authMethods: [],
       });
       const session = await withTimeout(
@@ -1837,6 +1841,7 @@ describe("015 explicit title ACP consumer", () => {
       });
       expect(initialized.agentCapabilities).toEqual({
         promptCapabilities: { image: false, embeddedContext: false },
+        _meta: { lody: { usage: { version: 1 } } },
       });
       const session = await fixture.client.request<acp.NewSessionResponse>("session/new", {
         cwd: fixture.directory, mcpServers: [],

@@ -3,7 +3,7 @@ import { writeSync } from "node:fs";
 import { constants } from "node:os";
 import { Readable, Writable } from "node:stream";
 import { AgentSideConnection, RequestError, type Agent, type Stream } from "@agentclientprotocol/sdk";
-import { LODY_EXTENSION_METHODS } from "acp-extension-core";
+import { LODY_EXTENSION_METHODS, type LodyExtensionCapabilities } from "acp-extension-core";
 import packageJson from "../package.json" with { type: "json" };
 
 import { OmpRpcConnection } from "./connection.js";
@@ -276,7 +276,8 @@ export function serve(stream: Stream, options: ServeOptions) {
         agentInfo: { name: "omp-rpc", version: packageJson.version },
         agentCapabilities: {
           promptCapabilities: { image: false, embeddedContext: false },
-          // Optional capabilities stay unadvertised until the baseline matrix and review pass.
+          // Other optional capabilities stay unadvertised until the baseline matrix and review pass.
+          _meta: { lody: { usage: { version: 1 } } satisfies LodyExtensionCapabilities },
         },
         authMethods: [],
       }),

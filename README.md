@@ -17,7 +17,7 @@ does not bundle OMP, inspect credentials, or persist user session data.
 发布前，必须通过稳定版本和操作系统矩阵（包括 18.2.8 在 macOS 以外的系统）、
 独立维护者审核、可复现的运行时归档、公开校验和回读以及 Lody
 端到端验收。这些门禁记录在 `TESTING.md` 和
-`RELEASE.md` 中；可选的 load/resume/usage 能力宣告仍保持禁用。
+`RELEASE.md` 中；已宣告 Lody usage 能力，可选的 load/resume 能力宣告仍保持禁用。
 
 改这个仓库的 agent 先读 `AGENTS.md`。能力与发布边界仍以 `README.md`、
 `COMPATIBILITY.md`、`TESTING.md`、`RELEASE.md`、`MIGRATION.md` 为准；
@@ -82,7 +82,7 @@ new／load／resume／fork 等待真实目录及最终同文件 state 后才交�
 预判。含未支持内容块时整请求拒绝；原生拒绝不重试纯文字。
 steering 与 interactions 等未实现控制仍不宣告。
 
-Load, resume, usage, basic fork, and images remain unadvertised in ACP initialize:
+ACP initialize advertises `_meta.lody.usage: { version: 1 }`. Load, resume, basic fork, and images remain unadvertised:
 fork capability is absent and `promptCapabilities.image` remains false. These
 implemented translation paths are not a production support promise; basic fork,
 images, model configuration, and explicit titles still require the real target matrix and
