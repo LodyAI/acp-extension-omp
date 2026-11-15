@@ -17,7 +17,7 @@ does not bundle OMP, inspect credentials, or persist user session data.
 发布前，必须通过稳定版本和操作系统矩阵（包括 18.2.8 在 macOS 以外的系统）、
 独立维护者审核、可复现的运行时归档、公开校验和回读以及 Lody
 端到端验收。这些门禁记录在 `TESTING.md` 和
-`RELEASE.md` 中；已宣告 Lody usage 能力，可选的 load/resume 能力宣告仍保持禁用。
+`RELEASE.md` 中；已宣告 Lody usage、resume、fork 和图片能力，load 能力宣告仍保持禁用。
 
 改这个仓库的 agent 先读 `AGENTS.md`。能力与发布边界仍以 `README.md`、
 `COMPATIBILITY.md`、`TESTING.md`、`RELEASE.md`、`MIGRATION.md` 为准；
@@ -73,7 +73,7 @@ new／load／resume／fork 等待真实目录及最终同文件 state 后才交�
 原生默认；显式模型为空、未知或配置格式错误时失败，不退回默认。未知 metadata 扩展字段忽略，
 明确提供但未支持的配置选项拒绝。模型来源始终为目录中的原始 provider／id，支持没有原生默认模型
 时显式选择；失败不交付可用身份，不重试或回滚。此保证不等于在 OMP 进程启动或原生 new／switch
-之前原子选模，也不开放仍受独立门禁约束的 load／resume／fork 能力宣告。
+之前原子选模，也不开放 load 能力宣告。
 
 显式标题 T1 入口仅为单个 text block 起首精确 `/rename` 后接空白与非空标题，内部调用现有
 `set_session_name`，不再发 native prompt、不调用原生 card 生成或 input hook。
@@ -86,14 +86,18 @@ new／load／resume／fork 等待真实目录及最终同文件 state 后才交�
 
 `prompt` 已翻译内联图片：保留文字的双换行拼接，按原顺序转发图片
 `data`／`mimeType`，支持 image-only；不读取 `uri`、不添加模型／MIME／编码
-预判。含未支持内容块时整请求拒绝；原生拒绝不重试纯文字。
+预判。`resource_link` 按块顺序翻译成一段文字 `<name>: <uri>`，和其他文字一样拼接；
+适配器不读取链接内容、不校验 scheme，`file://` URI 保持宿主给的百分号编码。
+含 `audio` 或 `resource` 等未支持内容块时整请求拒绝；原生拒绝不重试纯文字。
 steering 与 interactions 等未实现控制仍不宣告。
 
-ACP initialize advertises `_meta.lody.usage: { version: 1 }`. Load, resume, basic fork, and images remain unadvertised:
-fork capability is absent and `promptCapabilities.image` remains false. These
-implemented translation paths are not a production support promise; basic fork,
-images, model configuration, and explicit titles still require the real target matrix and
-independent R3 review before claiming support. Future OMP versions are not assumed compatible from their
+ACP initialize advertises `_meta.lody.usage: { version: 1 }`,
+`sessionCapabilities.resume`, `sessionCapabilities.fork` and
+`promptCapabilities.image: true`. `loadSession` stays unadvertised: the method
+only switches to the exact native session and does not replay history, which
+ACP `session/load` requires. The advertised set has real-OMP evidence only on
+the macOS arm64 rows recorded in `TESTING.md`; it is not a production support
+promise until the release gates in `RELEASE.md` pass. Future OMP versions are not assumed compatible from their
 version alone.
 
 The adapter launches only `omp --mode rpc`. OMP diagnostics go to stderr; ACP

@@ -24,9 +24,15 @@ Status: repository candidate; no production OMP version is declared supported ye
 ## Runtime and release policy
 
 Version strings record evidence; they do not prove protocol compatibility.
-The candidate advertises Lody usage and withholds optional load/resume capability advertisements
-until the baseline matrix and independent review pass. Explicit contract-runner
-calls still exercise those implementation paths.
+The candidate advertises Lody usage, `sessionCapabilities.resume`,
+`sessionCapabilities.fork` and `promptCapabilities.image`. It withholds
+`loadSession` because the adapter does not replay history; explicit
+contract-runner calls still exercise that implementation path.
+
+`scripts/contract.mjs` does not cover fork, images or `resource_link`. Every new
+OMP target row must also run `scripts/capability-probe.mjs` against that
+executable; without it, the resume, fork and image advertisements have no real
+evidence for that version.
 
 Current terminal `prompt_result` frames must supply a recognized status and
 boolean `sessionSettled`. A yielded result with `sessionSettled: false` does not

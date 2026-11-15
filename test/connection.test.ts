@@ -3158,6 +3158,10 @@ describe("015 explicit title connection consumer", () => {
       label: "mixed image",
       prompt: [{ type: "text", text: "/rename Named" }, { type: "image", data: "AAEC", mimeType: "image/x-synthetic" }],
     },
+    {
+      label: "resource link attachment",
+      prompt: [{ type: "text", text: "/rename Named" }, { type: "resource_link", uri: "file:///work/notes.txt", name: "notes.txt" }],
+    },
   ] satisfies { label: string; prompt: acp.ContentBlock[] }[])(
     "leaves $label on the ordinary native route and never tags unknown title frames explicit",
     async ({ prompt }) => {
@@ -3174,7 +3178,9 @@ describe("015 explicit title connection consumer", () => {
       expect(commands.filter((command) => command.type === "set_session_name")).toEqual([]);
       expect(commands.filter((command) => command.type === "prompt")).toEqual([expect.objectContaining({
         type: "prompt",
-        message: prompt.flatMap((block) => block.type === "text" ? [block.text] : []).join("\n\n"),
+        message: prompt.flatMap((block) =>
+          block.type === "text" ? [block.text] : block.type === "resource_link" ? [`${block.name}: ${block.uri}`] : []
+        ).join("\n\n"),
       })]);
       expect(commands.filter((command) => command.type === "get_session_stats")).toHaveLength(1);
     },

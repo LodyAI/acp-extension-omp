@@ -10,6 +10,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import { realpathSync, rmSync, statSync } from "node:fs";
 
 const entry = resolve(process.argv[2]);
 const binary = resolve(process.argv[3]);
@@ -23,15 +24,22 @@ const requests = [];
 const endpoint = createServer(async (request, response) => {
   let body = "";
   for await (const chunk of request) body += chunk;
-  // 只保留布尔观察值，不保存请求正文。
+  // 只保留观察值，不保存请求正文。每个请求单独判定，避免几项证据分别落在不同请求上。
+  let messages = [];
+  try { messages = JSON.parse(body).messages ?? []; } catch { /* 记为空请求，由断言报告失败 */ }
+  const last = messages.filter((m) => m.role === "user").at(-1)?.content;
+  const parts = Array.isArray(last) ? last : [];
+  const lastText = typeof last === "string" ? last : parts.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+  // OMP 会把内联图片转码（观察到 PNG 变成 WebP），所以核对图片部件能解码且非空，而不是比对原始字节。
+  const images = parts.filter((part) => part.type === "image_url").map((part) => /^data:(image\/[\w.+-]+);base64,(.+)$/.exec(String(part.image_url?.url)));
   requests.push({
-    // OMP 会把内联图片转码（观察到 PNG 变成 WebP），所以核对最后一条用户消息里的图片部件，而不是原始字节。
-    hasImage: ((JSON.parse(body).messages ?? []).filter((m) => m.role === "user").at(-1)?.content ?? [])
-      .some?.((part) => part.type === "image_url" && String(part.image_url?.url).startsWith("data:image/")) ?? false,
+    imageParts: images.length,
+    imageMimes: images.map((match) => match?.[1] ?? "invalid"),
+    imageDecodes: images.length > 0 && images.every((match) => match && Buffer.from(match[2], "base64").length > 0),
     hasOriginalImageBytes: body.includes(PNG),
-    hasLinkText: body.includes(`${LINK.name}: ${LINK.uri}`),
-    hasHistory: (JSON.parse(body).messages ?? []).some((m) => m.role === "assistant" && JSON.stringify(m.content).includes("probe answer"))
-      && (JSON.parse(body).messages ?? []).some((m) => m.role === "user" && JSON.stringify(m.content).includes("source turn one")),
+    hasLinkText: lastText.includes(`${LINK.name}: ${LINK.uri}`),
+    hasHistory: messages.some((m) => m.role === "assistant" && JSON.stringify(m.content).includes("probe answer"))
+      && messages.some((m) => m.role === "user" && JSON.stringify(m.content).includes("source turn one")),
   });
   response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
   const chunk = (value) => response.write(`data: ${JSON.stringify({ id: "probe", object: "chat.completion.chunk", created: 1, model: "probe-model", ...value })}\n\n`);
@@ -48,13 +56,15 @@ const env = {
 };
 const clients = [];
 function start() {
-  const child = spawn(process.execPath, [entry], { cwd: workdir, env, stdio: ["pipe", "pipe", "pipe"] });
+  // detached：清理时可以连同 OMP 子孙一起按进程组回收。
+  const child = spawn(process.execPath, [entry], { cwd: workdir, env, stdio: ["pipe", "pipe", "pipe"], detached: true });
   child.stderr.on("data", () => {});
   const closed = new Promise((done) => child.once("close", (code, signal) => done({ code, signal })));
   const pending = new Map();
   let sequence = 0;
   createInterface({ input: child.stdout }).on("line", (line) => {
-    const frame = JSON.parse(line);
+    let frame;
+    try { frame = JSON.parse(line); } catch { return; }
     const operation = pending.get(frame.id);
     if (!operation || frame.method) return;
     pending.delete(frame.id);
@@ -74,7 +84,12 @@ function start() {
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${method} timed out`)), 60_000); }),
       ]).finally(() => clearTimeout(timer));
     },
-    async close() { child.stdin.end(); return closed; },
+    async close() {
+      child.stdin.end();
+      const exited = await Promise.race([closed, new Promise((done) => setTimeout(() => done(undefined), 10_000))]);
+      if (!exited) { this.kill(); await closed; }
+    },
+    kill() { try { process.kill(-child.pid, "SIGKILL"); } catch { /* 已退出 */ } },
   };
   clients.push(client);
   return client;
@@ -83,6 +98,13 @@ const sha = async (file) => createHash("sha256").update(await readFile(file)).di
 const text = (value) => [{ type: "text", text: value }];
 
 const out = {};
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, () => {
+    for (const client of clients) client.kill();
+    rmSync(scratch, { recursive: true, force: true });
+    process.exit(1);
+  });
+}
 try {
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(workdir, { recursive: true })]);
   const bin = join(scratch, "bin");
@@ -102,8 +124,15 @@ try {
   // 源会话：一轮文字 prompt，产生持久文件。
   const source = start();
   out.capabilities = (await source.request("initialize", init)).agentCapabilities;
+  assert.deepEqual(out.capabilities, {
+    promptCapabilities: { image: true, embeddedContext: false },
+    sessionCapabilities: { resume: {}, fork: {} },
+    _meta: { lody: { usage: { version: 1 } } },
+  }, "probe must run against the reviewed capability set");
   const created = await source.request("session/new", session);
   const sourceFile = created.sessionId;
+  out.isolatedSessionFile = realpathSync(sourceFile).startsWith(realpathSync(scratch));
+  assert.ok(out.isolatedSessionFile, "session files must stay inside the probe's temporary HOME");
   assert.equal((await source.request("session/prompt", { sessionId: sourceFile, prompt: text("source turn one") })).stopReason, "end_turn");
   const before = await sha(sourceFile);
 
@@ -127,16 +156,16 @@ try {
   });
   assert.equal(imageTurn.stopReason, "end_turn");
   const seen = requests.slice(mark);
+  const hit = seen.find((r) => r.imageParts === 1 && r.imageDecodes && r.hasLinkText && r.hasHistory);
   out.image = {
     modelRequests: seen.length,
-    imagePartReachedModel: seen.some((r) => r.hasImage),
+    oneRequestHasImageLinkAndHistory: hit !== undefined,
+    imageMime: hit?.imageMimes[0],
     originalBytesPreserved: seen.some((r) => r.hasOriginalImageBytes),
-    linkTextReachedModel: seen.some((r) => r.hasLinkText),
-    forkCarriedSourceHistory: seen.some((r) => r.hasHistory),
   };
-  assert.ok(out.image.imagePartReachedModel, "an image part must reach the model request");
-  assert.ok(out.image.linkTextReachedModel, "resource_link text must reach the model request");
-  assert.ok(out.image.forkCarriedSourceHistory, "fork must carry the source history");
+  assert.ok(hit, "one model request must carry exactly one decodable image part, the resource_link text and the source history");
+  out.fork.sourceUnchangedAfterForkPrompt = before === await sha(sourceFile);
+  assert.ok(out.fork.sourceUnchangedAfterForkPrompt, "prompting the fork must not modify the source sessionFile");
   const forkFileAfterImage = await sha(forked.sessionId);
 
   // 源会话在 fork 之后仍可继续，且不影响 fork 出的文件。
@@ -149,14 +178,16 @@ try {
   // resume：新连接恢复源文件并完成一轮，模型请求带有历史。
   const resumer = start();
   await resumer.request("initialize", init);
-  const resumed = await resumer.request("session/resume", { sessionId: sourceFile, ...session });
+  await resumer.request("session/resume", { sessionId: sourceFile, ...session });
   const resumeMark = requests.length;
+  const sizeBefore = statSync(sourceFile).size;
   assert.equal((await resumer.request("session/prompt", { sessionId: sourceFile, prompt: text("after resume") })).stopReason, "end_turn");
   out.resume = {
-    sameFile: resumed.sessionId === undefined || resumed.sessionId === sourceFile,
     historyReachedModel: requests.slice(resumeMark).some((r) => r.hasHistory),
+    sourceFileGrew: statSync(sourceFile).size > sizeBefore,
   };
-  assert.ok(out.resume.sameFile && out.resume.historyReachedModel);
+  assert.ok(out.resume.historyReachedModel, "the resumed prompt must carry the source history");
+  assert.ok(out.resume.sourceFileGrew, "the resumed prompt must be written to the same sessionFile");
   await resumer.close();
   console.log(JSON.stringify(out, null, 2));
   console.log("CAPABILITY PROBE PASS");
@@ -165,7 +196,7 @@ try {
   console.log(`CAPABILITY PROBE FAIL: ${error.message}`);
   process.exitCode = 1;
 } finally {
-  for (const client of clients) await Promise.race([client.close(), new Promise((done) => setTimeout(done, 5_000))]).catch(() => {});
+  for (const client of clients) client.kill();
   endpoint.close();
   await rm(scratch, { recursive: true, force: true });
 }
