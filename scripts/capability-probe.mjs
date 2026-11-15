@@ -36,7 +36,7 @@ const endpoint = createServer(async (request, response) => {
   const last = messages.filter((m) => m.role === "user").at(-1)?.content;
   const parts = Array.isArray(last) ? last : [];
   const lastText = typeof last === "string" ? last : parts.filter((part) => part.type === "text").map((part) => part.text).join("\n");
-  // OMP 会把内联图片转码（观察到 PNG 变成 WebP），所以核对图片部件能解码且非空，而不是比对原始字节。
+  // OMP 会把内联图片转码（观察到 PNG 变成 WebP），所以按文件签名核对图片部件，而不是比对原始字节。
   const images = parts.filter((part) => part.type === "image_url").map((part) => /^data:(image\/[\w.+-]+);base64,(.+)$/.exec(String(part.image_url?.url)));
   requests.push({
     imageParts: images.length,
@@ -61,9 +61,12 @@ const env = {
   XDG_CACHE_HOME: join(home, ".cache"), TMPDIR: scratch, TMP: scratch, TEMP: scratch,
 };
 const clients = [];
+let stopping = false;
 function start() {
+  if (stopping) throw new Error("Probe is shutting down");
   const child = spawn(process.execPath, [entry], { cwd: workdir, env, stdio: ["pipe", "pipe", "pipe"] });
   child.stderr.on("data", () => {});
+  child.stdin.on("error", () => {}); // 关闭后迟到的写入不能变成未捕获异常。
   const closed = new Promise((done) => child.once("close", (code, signal) => done({ code, signal })));
   const pending = new Map();
   let sequence = 0;
@@ -79,6 +82,7 @@ function start() {
   const client = {
     closed,
     request(method, params) {
+      if (stopping) return Promise.reject(new Error("Probe is shutting down"));
       const id = ++sequence;
       const operation = Promise.withResolvers();
       pending.set(id, operation);
@@ -90,16 +94,24 @@ function start() {
       ]).finally(() => clearTimeout(timer));
     },
     // OMP 在适配器自己的进程组之外，只有适配器能回收它：先关 stdin，再发 SIGTERM，都交给适配器的
-    // 关闭路径；SIGKILL 只是兜底，那时 OMP 可能残留，由调用方报告。已退出的子进程不再发信号。
+    // 关闭路径。SIGKILL 只是兜底，那时 OMP 可能残留，返回 false 让 shutdown 报告并置失败退出码。
+    // 已退出的子进程不再发信号。
     async close() {
-      const waitFor = (ms) => Promise.race([closed.then(() => true), new Promise((done) => setTimeout(() => done(false), ms))]);
-      if (child.exitCode !== null || child.signalCode !== null) return closed;
+      const waitFor = (ms) => {
+        let timer;
+        return Promise.race([
+          closed.then(() => true),
+          new Promise((done) => { timer = setTimeout(() => done(false), ms); }),
+        ]).finally(() => clearTimeout(timer));
+      };
+      if (child.exitCode !== null || child.signalCode !== null) return true;
       child.stdin.end();
-      if (await waitFor(10_000)) return closed;
+      if (await waitFor(10_000)) return true;
       child.kill("SIGTERM");
-      if (await waitFor(10_000)) return closed;
+      if (await waitFor(10_000)) return true;
       child.kill("SIGKILL");
-      return closed;
+      await closed;
+      return false;
     },
   };
   clients.push(client);
@@ -111,7 +123,12 @@ const text = (value) => [{ type: "text", text: value }];
 const out = {};
 // 中断时也走适配器的正常关闭，等它回收 OMP 之后才删临时目录。
 async function shutdown() {
-  await Promise.all(clients.map((client) => client.close().catch(() => {})));
+  stopping = true;
+  const graceful = await Promise.all(clients.map((client) => client.close().catch(() => false)));
+  if (graceful.includes(false)) {
+    console.log("CAPABILITY PROBE CLEANUP FAILED: an adapter had to be killed; check for a leftover `omp --mode rpc` process");
+    process.exitCode = 1;
+  }
   endpoint.close();
   endpoint.closeAllConnections();
   await rm(scratch, { recursive: true, force: true });
