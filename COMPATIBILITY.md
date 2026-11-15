@@ -62,7 +62,13 @@ session identity，其来源与正常新消息无法区别，仍按当前 prompt
 background/settlement 后绝无旧帧。归属记录随连接内不同消息 ID 数量增长，不做
 会丢失旧归属证据的淘汰。
 
-Release requires the full matrix. A future optional-capability policy must be
+Release requires the full matrix. For Release 1 the approved matrix is the
+Latest stable and Previous stable rows on macOS arm64 (user ruling, 2026-11-16:
+macOS is the only hardware available for testing; see
+`docs-ai/012-remaining-v1-gates/018-macos-only-platform-scope.md`). Linux,
+Windows and other architectures have no real-OMP evidence and are not claimed
+as supported; rows for them, including 18.2.8 outside macOS, are not Release 1
+gates. A future optional-capability policy must be
 based on proven RPC primitives, not a greater version number. No runtime
 multi-version capability discovery is claimed by this candidate.
 

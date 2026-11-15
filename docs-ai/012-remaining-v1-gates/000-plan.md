@@ -136,3 +136,4 @@ LI-002 随 R3 对 load 和 resume 的决定一起收。LI-003 先在 Lody 界面
 - 更新于 2026-10-26：补记 PR #18 合并时就地改写了本文件正文，按规则本应新开编号；不回写正文 — 见 [014-pr18-in-place-rewrite.md](014-pr18-in-place-rewrite.md)
 - 更新于 2026-10-26：纠正文档时态、证据强度与跨仓归属，保留旧编号正文；整体仍计划中，局部实施许可不扩大 — 见 [015-factual-corrections.md](015-factual-corrections.md)
 - 更新于 2026-11-15：用户裁决子 agent 状态移出 Release 1、适配目标改为 18.20.2／18.20.1、授权下载 18.20.1 官方资产用于测试，能力宣告交 019 计划 — 见 [017-release1-scope-and-target.md](017-release1-scope-and-target.md)
+- 更新于 2026-11-16：用户裁决目前只有 Mac 可测，Release 1 的平台范围定为 macOS arm64，其他 OS 行不再是 Release 1 门禁、仍列为未验证 — 见 [018-macos-only-platform-scope.md](018-macos-only-platform-scope.md)
