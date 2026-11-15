@@ -206,7 +206,7 @@ try {
   out.fork.sourceStillUsable = true;
   out.fork.forkFileUntouchedBySource = forkFileAfterImage === await sha(forked.sessionId);
   assert.ok(out.fork.forkFileUntouchedBySource);
-  for (const client of [source, forker]) await client.close();
+  for (const client of [source, forker]) assert.ok(await client.close(), "adapter must exit without a forced kill");
 
   // resume：新连接恢复源文件并完成一轮，模型请求带有历史。
   const resumer = start();
@@ -221,7 +221,7 @@ try {
   };
   assert.ok(out.resume.historyReachedModel, "the resumed prompt must carry the source history");
   assert.ok(out.resume.sourceFileGrew, "the resumed prompt must be written to the same sessionFile");
-  await resumer.close();
+  assert.ok(await resumer.close(), "adapter must exit without a forced kill");
   console.log(JSON.stringify(out, null, 2));
   console.log("CAPABILITY PROBE PASS");
 } catch (error) {
