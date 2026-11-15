@@ -32,7 +32,9 @@ contract-runner calls still exercise that implementation path.
 `scripts/contract.mjs` does not cover fork, images or `resource_link`. Every new
 OMP target row must also run `scripts/capability-probe.mjs` against that
 executable; without it, the resume, fork and image advertisements have no real
-evidence for that version.
+evidence for that version. The current evidence for these advertisements is a single
+toolchain on macOS arm64 (see `TESTING.md`); whether that is enough to release
+is a maintainer decision at the release gate.
 
 Current terminal `prompt_result` frames must supply a recognized status and
 boolean `sessionSettled`. A yielded result with `sessionSettled: false` does not

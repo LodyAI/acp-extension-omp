@@ -10,7 +10,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { realpathSync, rmSync, statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 
 const entry = resolve(process.argv[2]);
 const binary = resolve(process.argv[3]);
@@ -21,6 +21,12 @@ const agentDir = join(home, ".omp", "profiles", "probe", "agent");
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 const LINK = { type: "resource_link", uri: "file:///synthetic/probe-image.png", name: "probe-image.png", mimeType: "image/png", size: 70 };
 const requests = [];
+// 按文件签名判定图片部件确实是一张图（PNG、JPEG、GIF 或 WebP），不比对原始字节。
+function isImage(bytes) {
+  const head = bytes.subarray(0, 12).toString("latin1");
+  return head.startsWith("\x89PNG\r\n\x1a\n") || head.startsWith("\xff\xd8\xff") || head.startsWith("GIF8")
+    || (head.startsWith("RIFF") && head.slice(8, 12) === "WEBP");
+}
 const endpoint = createServer(async (request, response) => {
   let body = "";
   for await (const chunk of request) body += chunk;
@@ -35,7 +41,7 @@ const endpoint = createServer(async (request, response) => {
   requests.push({
     imageParts: images.length,
     imageMimes: images.map((match) => match?.[1] ?? "invalid"),
-    imageDecodes: images.length > 0 && images.every((match) => match && Buffer.from(match[2], "base64").length > 0),
+    imageDecodes: images.length > 0 && images.every((match) => match && isImage(Buffer.from(match[2], "base64"))),
     hasOriginalImageBytes: body.includes(PNG),
     hasLinkText: lastText.includes(`${LINK.name}: ${LINK.uri}`),
     hasHistory: messages.some((m) => m.role === "assistant" && JSON.stringify(m.content).includes("probe answer"))
@@ -56,8 +62,7 @@ const env = {
 };
 const clients = [];
 function start() {
-  // detached：清理时可以连同 OMP 子孙一起按进程组回收。
-  const child = spawn(process.execPath, [entry], { cwd: workdir, env, stdio: ["pipe", "pipe", "pipe"], detached: true });
+  const child = spawn(process.execPath, [entry], { cwd: workdir, env, stdio: ["pipe", "pipe", "pipe"] });
   child.stderr.on("data", () => {});
   const closed = new Promise((done) => child.once("close", (code, signal) => done({ code, signal })));
   const pending = new Map();
@@ -84,12 +89,18 @@ function start() {
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${method} timed out`)), 60_000); }),
       ]).finally(() => clearTimeout(timer));
     },
+    // OMP 在适配器自己的进程组之外，只有适配器能回收它：先关 stdin，再发 SIGTERM，都交给适配器的
+    // 关闭路径；SIGKILL 只是兜底，那时 OMP 可能残留，由调用方报告。已退出的子进程不再发信号。
     async close() {
+      const waitFor = (ms) => Promise.race([closed.then(() => true), new Promise((done) => setTimeout(() => done(false), ms))]);
+      if (child.exitCode !== null || child.signalCode !== null) return closed;
       child.stdin.end();
-      const exited = await Promise.race([closed, new Promise((done) => setTimeout(() => done(undefined), 10_000))]);
-      if (!exited) { this.kill(); await closed; }
+      if (await waitFor(10_000)) return closed;
+      child.kill("SIGTERM");
+      if (await waitFor(10_000)) return closed;
+      child.kill("SIGKILL");
+      return closed;
     },
-    kill() { try { process.kill(-child.pid, "SIGKILL"); } catch { /* 已退出 */ } },
   };
   clients.push(client);
   return client;
@@ -98,12 +109,15 @@ const sha = async (file) => createHash("sha256").update(await readFile(file)).di
 const text = (value) => [{ type: "text", text: value }];
 
 const out = {};
+// 中断时也走适配器的正常关闭，等它回收 OMP 之后才删临时目录。
+async function shutdown() {
+  await Promise.all(clients.map((client) => client.close().catch(() => {})));
+  endpoint.close();
+  endpoint.closeAllConnections();
+  await rm(scratch, { recursive: true, force: true });
+}
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.once(signal, () => {
-    for (const client of clients) client.kill();
-    rmSync(scratch, { recursive: true, force: true });
-    process.exit(1);
-  });
+  process.once(signal, () => { void shutdown().finally(() => process.exit(1)); });
 }
 try {
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(workdir, { recursive: true })]);
@@ -146,6 +160,8 @@ try {
     sourceUnchangedAcrossFork: before === after,
   };
   assert.ok(out.fork.differentFile, "fork must select a different sessionFile");
+  out.fork.isolatedForkFile = realpathSync(forked.sessionId).startsWith(realpathSync(scratch));
+  assert.ok(out.fork.isolatedForkFile, "the forked session file must stay inside the probe's temporary HOME");
   assert.ok(out.fork.sourceUnchangedAcrossFork, "fork must not modify the source sessionFile");
 
   // 图片 + resource_link：在 fork 出的会话上发，核对回环端点实际收到的请求。
@@ -196,7 +212,5 @@ try {
   console.log(`CAPABILITY PROBE FAIL: ${error.message}`);
   process.exitCode = 1;
 } finally {
-  for (const client of clients) client.kill();
-  endpoint.close();
-  await rm(scratch, { recursive: true, force: true });
+  await shutdown();
 }
