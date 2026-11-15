@@ -68,6 +68,13 @@ new／load／resume／fork 等待真实目录及最终同文件 state 后才交�
 及最终实际模型，完整配置通知排空后才响应；不确定失败失效旧身份，须显式重新准备，
 不重试／rollback，也不重置计费 scope。无 model 的真实状态不发明默认 selector。
 
+四种会话入口还消费 Core `_meta.lody.sessionConfig` version 1：`modelId` 优先于
+`configOptionValues.model`，在 ACP 建立响应及首个 prompt 前设置并读回模型。省略或空配置保留
+原生默认；显式模型为空、未知或配置格式错误时失败，不退回默认。未知 metadata 扩展字段忽略，
+明确提供但未支持的配置选项拒绝。模型来源始终为目录中的原始 provider／id，支持没有原生默认模型
+时显式选择；失败不交付可用身份，不重试或回滚。此保证不等于在 OMP 进程启动或原生 new／switch
+之前原子选模，也不开放仍受独立门禁约束的 load／resume／fork 能力宣告。
+
 显式标题 T1 入口仅为单个 text block 起首精确 `/rename` 后接空白与非空标题，内部调用现有
 `set_session_name`，不再发 native prompt、不调用原生 card 生成或 input hook。
 只有单次 stats 核实原文件、最终 `get_state` 真实读回同一精确 file／清洗后 sessionName，

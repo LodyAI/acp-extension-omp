@@ -183,7 +183,7 @@ Local evidence, not a release declaration.
 
 ### 矩阵记录：OMP 18.12.6 (2026-10-25)
 
-本地证据，不是发布声明。当前适配目标（Latest stable）。运行细节见 `docs-ai/012-remaining-v1-gates/011-r1-macos-18.12.6-clean-matrix.md`，schema/behavior diff review 见 `docs-ai/012-remaining-v1-gates/013-omp-18.12.6-target-review.md`。
+本地证据，不是发布声明。历史适配目标（2026-10-25 的 Latest stable），现由 18.18.1 取代。运行细节见 `docs-ai/012-remaining-v1-gates/011-r1-macos-18.12.6-clean-matrix.md`，schema/behavior diff review 见 `docs-ai/012-remaining-v1-gates/013-omp-18.12.6-target-review.md`。
 
 上述历史记录的后续更正见 [012.015](docs-ai/012-remaining-v1-gates/015-factual-corrections.md)：运行细节、静态审查与历史审核摘要分别保留，不能由提交 diff 补证缺失的审核过程。
 
@@ -213,27 +213,77 @@ Local evidence, not a release declaration.
 - 真实 OMP 可执行文件跑通了 Required case 1–8 的主路径（范围同 18.12.2 条）。用例 5 的 wrong-identity 段、用例 7 的 duplicate-message / missing-cost、用例 9，以及合成夹具的固定模型目录回复，仍只由 `syntheticCases()` / 夹具覆盖。真实会话准备也会调用 `get_available_models` 并校验响应，但这不等于验证完整目录内容或模型切换合同。
 - 未验证：其他 OS 与 x64 目标、Windows 下的真实 OMP；原生后台任务；自动 compaction；真实退出路径（进行中的 SIGKILL、工具孙进程）；真实模型目录完整性及模型 A→B→A 切换；`51e1a04` 上的 CI 六行结果；独立审核与公开字节回读。上一稳定版 18.12.5 未安装、未测试。
 
+### 矩阵记录：OMP 18.18.1 (2026-11-08—09)
+
+仅限本地候选工作树证据，不是干净提交、发布声明或完整平台矩阵。历史适配目标（2026-11-09 的 Latest stable），现由 18.20.2 取代。
+
+| 字段 | 值 |
+| --- | --- |
+| OMP | 18.18.1，Homebrew `can1357/tap/omp`；显式入口 `/opt/homebrew/Cellar/omp/18.18.1/bin/omp` |
+| OMP 摘要 | 220595344 字节，SHA-256 `ce80099f10c5ea4367523767230cb5b920f30cc139b9cf8758c1cc4b2f1f9409`；与官方 `v18.18.1` 的 `omp-darwin-arm64` 资产一致 |
+| Node / npm | 26.13.0 / 11.20.0 |
+| OS | macOS 27.0.1，Darwin arm64 |
+| 源码身份 | 基于 `f3dd62a8424711a3ed1065482ddc09c27f172c73` 的未提交候选，包含原有消息分段改动及 018；`src/connection.ts` SHA-256 `9cde3fc815bc4166010f4a610f1ae41240418543785abcfd9194d56be704b807` |
+| Core | 固定 npm `acp-extension-core` 0.1.8；未切换到相邻 Core checkout |
+| 被测入口 | 当前候选 `npm run build` 生成的 `dist/index.js`；不是已发布制品 |
+| 测试配置 | runner 自建临时 HOME/profile；contract 和 startup 探针只用无凭据的本地回环模型 |
+| 结果 | `npm run check` 414 项通过；build、smoke、contract 均退出 0 |
+
+- 实际命令为 `node scripts/smoke.mjs dist/index.js /opt/homebrew/Cellar/omp/18.18.1/bin/omp`
+  和同参数的 `node scripts/contract.mjs`。smoke 不发 prompt；contract 的真实主路径覆盖
+  prompt、取消 ACK/终态/流关闭、精确 load/resume、usage、新重启 scope、逐事件顺序及原生错误。
+- 用例 5 的 valid-but-wrong identity、用例 7 的 dedup/correction/missing-cost 和用例 9 的
+  missing/exit/malformed/eof 仍是 `syntheticCases()` 的合成 RPC 证据，不能算真实 OMP 行为。
+- 独立临时 startup 探针通过真实 Lody 启动 resolver 调用同一入口，在 new/load/resume/fork
+  交付前传入两个本地模型的显式选择；四次首个实际 HTTP 模型请求依次为 B/A/B/A，建立响应配置一致，
+  load/resume 保留原文件、fork 产生不同文件。真实 usage 经 Lody parser 得到独立 scope；
+  未知模型拒绝且不发推理请求。相同 startup 探针也在保留的 OMP 18.12.6 上通过。
+- 初始化仍只宣告 usage，load/resume/fork/images 不因这些直接调用成功而开放。
+  两轮独立源码审查的范围与静态新版合同证据见
+  [018 行动记录](docs-ai/018-startup-session-config/001-action.md)。
+- 未验证：OMP 18.18.0 回归、当前候选的其他平台/架构及 Node 工具链、原生后台任务、
+  自动 compaction、真实进行中进程失败、付费 provider 账单完整性及 Lody GUI 操作。
+  本记录不替代干净候选 CI、能力宣告审核或公开制品回读。
+
+### 矩阵记录：OMP 18.20.2 (2026-11-15)
+
+仅限本地候选工作树证据，不是干净提交、发布声明或完整平台矩阵。
+
+| 字段 | 值 |
+| --- | --- |
+| OMP | 18.20.2，Homebrew `can1357/tap/omp`；显式入口 `/opt/homebrew/Cellar/omp/18.20.2/bin/omp` |
+| OMP 摘要 | 224277648 字节，SHA-256 `e2de0974ce581bfcf2044ea795c712fa240fdf8304f7bdb4b3d81b154d2b57fc`；与官方 `v18.20.2` 的 `omp-darwin-arm64` 资产一致 |
+| Node / npm | 26.13.0 / 11.20.0 |
+| OS | macOS 27.0.1，Darwin arm64 |
+| 源码身份 | 与 18.18.1 记录相同的未提交候选（基于 `f3dd62a8424711a3ed1065482ddc09c27f172c73`）；`src/connection.ts` SHA-256 `9cde3fc815bc4166010f4a610f1ae41240418543785abcfd9194d56be704b807` |
+| Core | 固定 npm `acp-extension-core` 0.1.8 |
+| 被测入口 | 当前候选 `npm run build` 生成的 `dist/index.js`；不是已发布制品 |
+| 测试配置 | runner 自建临时 HOME/profile；contract 只用无凭据的本地回环模型 |
+| 结果 | `npm run check` 414 项通过；build、smoke、contract 均退出 0 |
+
+- 实际命令为 `node scripts/smoke.mjs dist/index.js /opt/homebrew/Cellar/omp/18.20.2/bin/omp`
+  和同参数的 `node scripts/contract.mjs`，各跑一次，首次通过。contract 结束后
+  `pgrep -fl "omp --mode rpc"` 没有结果。真实主路径和合成部分的划分与 18.18.1 记录相同：
+  用例 5 的 wrong identity、用例 7 的 dedup/correction/missing-cost 和用例 9 仍是合成 RPC 证据。
+- 18.18.1→18.20.2 的静态比对只看了五个 RPC 文件。`rpc-session-settle.ts` 与
+  `rpc-session-events.ts` 的 blob 未变。`wire/frames.ts`、`wire/rpc-wire.schema.json` 和
+  `rpc-mode.ts` 有变化：扩展 UI select 的可选字段、steer 的 `parentIrc`、todo 任务状态去掉
+  `blocked`，以及模型目录刷新调用。这些都不在适配器当前使用面内。这是主 agent 的子集比对，
+  不是全面审计，也没有经过独立 reviewer。
+- 未验证：018 的 startup 双模型探针没有在 18.20.2 上重跑；OMP 18.20.1 回归、其他平台/架构及
+  Node 工具链、原生后台任务、自动 compaction、真实进行中进程失败、付费 provider 账单完整性及
+  Lody GUI 操作。本记录不替代干净候选 CI、能力宣告审核或公开制品回读。
+
 ## Remaining gates
 
 The OMP 18.2.8 baseline real contract passed on macOS arm64 / Node 22.22.3
 with the official `omp-darwin-arm64` asset (size and SHA-256 in
 `COMPATIBILITY.md`); other OS targets for 18.2.8 remain unverified.
-As of 2026-10-25 the current compatibility target is OMP 18.12.6 and the
-previous stable regression target is 18.12.5 (GitHub `can1357/oh-my-pi`
-releases `v18.12.6` and `v18.12.5`). 18.12.6 passed `npm run smoke` and
-`npm run contract` on macOS arm64 with Node 26.10.0 and 22.15.0 at adapter
-commit `51e1a04` through the installed npm archive; its Required test record
-is the 18.12.6 matrix record above (run details in
-`docs-ai/012-remaining-v1-gates/011-r1-macos-18.12.6-clean-matrix.md`), and
-the static schema/behavior diff review is
-`docs-ai/012-remaining-v1-gates/013-omp-18.12.6-target-review.md`. 18.12.5 is
-not installed and not tested; that row is blocked until a maintainer installs
-a binary matching the release digest in `COMPATIBILITY.md`. The 18.12.2 and
-18.12.1 records above (adapter commit `3258961`, Node 22.22.3, official assets
-downloaded under explicit maintainer-side authorization) are historical
-evidence only, not the current target rows. Other OS targets remain
-unverified, and the synthetic-only portions of cases 5/7/9 are not real-OMP
-evidence.
+截至 2026-11-15，当前适配目标为 OMP 18.20.2，上一稳定版回归目标为 18.20.1。
+上面的 18.20.2 记录来自 macOS arm64 / Node 26.13.0 的本地候选工作树，不是干净 tag 的矩阵行。
+18.20.1 尚未安装、未测试。18.18.x 与 18.12.x 记录保留原提交、工具链和限制，只作历史证据。
+这些历史记录及直接 load/resume 成功均不关闭当前 baseline、平台或能力宣告门禁。
+用例 5/7/9 的合成部分继续与真实 OMP 证据分开。
 Agents still must not download OMP without such authorization. The 2026-10-09
 names 18.8.6 and 18.8.5 are not the current target. 18.8.4 above is neither
 row, including when it is the `omp` found on `PATH`. Required next
