@@ -301,6 +301,40 @@ describe("OMP RPC connection", () => {
     });
   });
 
+  it("translates resource links to name: uri text in block order next to inline images", async () => {
+    const p = peer();
+    peers.push(p);
+    const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    await expect(p.connection.prompt({
+      sessionId: session.sessionId,
+      prompt: [
+        { type: "text", text: "look at this" },
+        { type: "image", data: "AAEC", mimeType: "image/png" },
+        { type: "resource_link", uri: "file:///work/.lody/attachments/shot%201.png", name: "shot 1.png", mimeType: "image/png", size: 3 },
+        { type: "resource_link", uri: "https://invalid.example/context", name: "synthetic\ncontext" },
+        { type: "text", text: "thanks" },
+      ],
+    })).resolves.toEqual({ stopReason: "end_turn" });
+    expect(p.received.filter((value) => value.type === "prompt")).toEqual([{
+      id: expect.any(String), type: "prompt",
+      message: "look at this\n\nshot 1.png: file:///work/.lody/attachments/shot%201.png\n\nsynthetic\ncontext: https://invalid.example/context\n\nthanks",
+      images: [{ type: "image", data: "AAEC", mimeType: "image/png" }],
+    }]);
+  });
+
+  it("submits a resource-link-only prompt as text without an images field", async () => {
+    const p = peer();
+    peers.push(p);
+    const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    await expect(p.connection.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "resource_link", uri: "file:///work/notes.txt", name: "notes.txt" }],
+    })).resolves.toEqual({ stopReason: "end_turn" });
+    expect(p.received.find((value) => value.type === "prompt")).toEqual({
+      id: expect.any(String), type: "prompt", message: "notes.txt: file:///work/notes.txt",
+    });
+  });
+
   it("keeps the existing text-only payload and blank-block joining without an images field", async () => {
     const p = peer();
     peers.push(p);
@@ -317,7 +351,6 @@ describe("OMP RPC connection", () => {
   it.each([
     { type: "audio", data: "c291bmQ=", mimeType: "audio/wav" },
     { type: "resource", resource: { uri: "file:///synthetic-context", text: "embedded context" } },
-    { type: "resource_link", uri: "https://invalid.example/context", name: "synthetic context" },
   ] satisfies acp.ContentBlock[])("rejects a mixed $type request atomically and remains usable", async (unsupported) => {
     const p = peer();
     peers.push(p);
@@ -383,6 +416,47 @@ describe("OMP RPC connection", () => {
       sessionId: session.sessionId,
       update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hello" } },
     });
+  });
+
+  it("separates text from consecutive assistant messages with a paragraph break", async () => {
+    const p = peer();
+    peers.push(p);
+    const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    const text = (messageId: string, delta: string) => ({
+      type: "message_update",
+      messageId,
+      message: { role: "assistant" },
+      assistantMessageEvent: { type: "text_delta", delta },
+    });
+    let turn = 0;
+    p.setPrompt((command) => {
+      p.reply(command, {});
+      turn += 1;
+      if (turn === 1) {
+        p.emit(text("assistant-1", "Reading files."));
+        p.emit(text("assistant-1", " Then checking."));
+        p.emit({ type: "message_update", messageId: "assistant-2", message: { role: "assistant" }, assistantMessageEvent: { type: "toolcall_start" } });
+        p.emit(text("assistant-2", "Done."));
+        p.emit({
+          type: "message_update",
+          message: { role: "assistant", responseId: "legacy-3" },
+          assistantMessageEvent: { type: "text_delta", delta: "Legacy." },
+        });
+      } else {
+        p.emit(text("assistant-4", "Next turn."));
+      }
+      p.emit({ type: "prompt_result", id: command.id, agentInvoked: true, status: "completed", sessionSettled: true });
+    });
+    for (const prompt of ["first", "second"]) {
+      await expect(
+        p.connection.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: prompt }] })
+      ).resolves.toEqual({ stopReason: "end_turn" });
+    }
+    expect(
+      p.updates.flatMap(({ update }) =>
+        update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" ? [update.content.text] : []
+      )
+    ).toEqual(["Reading files.", " Then checking.", "\n\nDone.", "\n\nLegacy.", "Next turn."]);
   });
 
   it("finishes a locally handled prompt without waiting for a nonexistent terminal frame", async () => {
@@ -3084,6 +3158,10 @@ describe("015 explicit title connection consumer", () => {
       label: "mixed image",
       prompt: [{ type: "text", text: "/rename Named" }, { type: "image", data: "AAEC", mimeType: "image/x-synthetic" }],
     },
+    {
+      label: "resource link attachment",
+      prompt: [{ type: "text", text: "/rename Named" }, { type: "resource_link", uri: "file:///work/notes.txt", name: "notes.txt" }],
+    },
   ] satisfies { label: string; prompt: acp.ContentBlock[] }[])(
     "leaves $label on the ordinary native route and never tags unknown title frames explicit",
     async ({ prompt }) => {
@@ -3100,7 +3178,9 @@ describe("015 explicit title connection consumer", () => {
       expect(commands.filter((command) => command.type === "set_session_name")).toEqual([]);
       expect(commands.filter((command) => command.type === "prompt")).toEqual([expect.objectContaining({
         type: "prompt",
-        message: prompt.flatMap((block) => block.type === "text" ? [block.text] : []).join("\n\n"),
+        message: prompt.flatMap((block) =>
+          block.type === "text" ? [block.text] : block.type === "resource_link" ? [`${block.name}: ${block.uri}`] : []
+        ).join("\n\n"),
       })]);
       expect(commands.filter((command) => command.type === "get_session_stats")).toHaveLength(1);
     },
@@ -3498,5 +3578,228 @@ describe("015 explicit title connection consumer", () => {
     else await expect(prompt).resolves.toEqual({ stopReason: "cancelled" });
     expect(p.failures).toEqual([]);
     await expect(ordinaryPrompt(p, source)).resolves.toEqual({ stopReason: "end_turn" });
+  });
+});
+
+describe("018 startup session model", () => {
+  const peers: Peer[] = [];
+  const directories: string[] = [];
+  const operations = ["new", "load", "resume", "fork"] as const;
+  type Operation = typeof operations[number];
+
+  afterEach(async () => {
+    for (const p of peers.splice(0)) p.close();
+    for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
+  });
+
+  async function setup(operation: Operation) {
+    const p = peer();
+    peers.push(p);
+    const directory = await mkdtemp(join(tmpdir(), "omp-startup-model-"));
+    directories.push(directory);
+    const source = join(directory, "source.jsonl");
+    const target = join(directory, "target.jsonl");
+    await Promise.all([source, target].map((file) => writeFile(file, '{"type":"session"}\n')));
+    p.state.sessionFile = operation === "fork" ? source : target;
+    p.setFork((command) => {
+      p.state.sessionFile = target;
+      p.reply(command, { cancelled: false });
+    });
+    function start(sessionConfig?: unknown) {
+      const request = {
+        cwd: directory, sessionId: operation === "fork" ? source : target, mcpServers: [],
+        ...(sessionConfig === undefined ? {} : { _meta: { lody: { sessionConfig } } }),
+      };
+      return operation === "new" ? p.connection.newSession(request)
+        : operation === "load" ? p.connection.loadSession(request)
+        : operation === "resume" ? p.connection.resumeSession(request) : p.connection.forkSession(request);
+    }
+    return { p, source, target, start };
+  }
+
+  async function firstPrompt(p: Peer, sessionId: string, expectedModel: string) {
+    p.setPrompt((command) => {
+      const model = p.state.model;
+      const messageId = `startup-${String(command.id)}`;
+      p.reply(command);
+      p.emitBatch([
+        { type: "message_start", messageId, message: { role: "assistant" } },
+        { type: "message_update", messageId, message: { role: "assistant" },
+          assistantMessageEvent: { type: "text_delta", delta: `${model.provider}/${model.id}` } },
+        { type: "message_end", messageId, message: { role: "assistant", provider: model.provider, model: model.id } },
+        { type: "prompt_result", id: command.id, status: "completed", sessionSettled: true },
+      ]);
+    });
+    await expect(p.connection.prompt({
+      sessionId, prompt: [{ type: "text", text: "first prompt model" }],
+    })).resolves.toEqual({ stopReason: "end_turn" });
+    expect(p.updates.filter((notification) => notification.update.sessionUpdate === "agent_message_chunk"))
+      .toEqual([{
+        sessionId,
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: expectedModel } },
+      }]);
+  }
+
+  it.each(operations)("applies %s startup modelId before delivery and the first observable prompt", async (operation) => {
+    const { p, target, start } = await setup(operation);
+    const result = await start({
+      version: 1, modelId: "org/branch/leaf", configOptionValues: { model: "other/family/x" },
+    });
+    expect(result.configOptions).toEqual([expect.objectContaining({ currentValue: "org/branch/leaf" })]);
+    if ("sessionId" in result) expect(result.sessionId).toBe(target);
+    expect(p.received.filter((command) => command.type === "set_model")).toEqual([
+      expect.objectContaining({ provider: "org/branch", modelId: "leaf" }),
+    ]);
+    await firstPrompt(p, target, "org/branch/leaf");
+  });
+
+  it.each(operations)("consumes %s startup model option without splitting its native id", async (operation) => {
+    const { p, target, start } = await setup(operation);
+    const result = await start({ version: 1, configOptionValues: { model: "other/family/x" } });
+    expect(result.configOptions).toEqual([expect.objectContaining({ currentValue: "other/family/x" })]);
+    expect(p.received.filter((command) => command.type === "set_model")).toEqual([
+      expect.objectContaining({ provider: "other", modelId: "family/x" }),
+    ]);
+    await firstPrompt(p, target, "other/family/x");
+  });
+
+  it.each(operations)("accepts %s startup model without a native default model", async (operation) => {
+    const { p, target, start } = await setup(operation);
+    let applied = false;
+    p.setState((command) => p.reply(command, { ...p.state, model: applied ? p.state.model : undefined }));
+    p.setModel((command) => {
+      applied = true;
+      p.state.model = p.models[1]!;
+      p.reply(command, p.state.model);
+    });
+    const result = await start({ version: 1, modelId: "other/family/x" });
+    expect(result.configOptions).toEqual([expect.objectContaining({ currentValue: "other/family/x" })]);
+    await firstPrompt(p, target, "other/family/x");
+  });
+
+  it.each(operations)("keeps %s startup metadata extensible and permits later live model selection", async (operation) => {
+    const { p, target, start } = await setup(operation);
+    await start({
+      version: 1, modelId: "org/branch/leaf", configOptionValues: { model: "ignored/missing" },
+      futureField: { enabled: true },
+    });
+    const result = await p.connection.setSessionConfigOption({
+      sessionId: target, configId: "model", value: "other/family/x",
+    });
+    expect(result.configOptions).toEqual([expect.objectContaining({ currentValue: "other/family/x" })]);
+    await firstPrompt(p, target, "other/family/x");
+  });
+
+  it.each(operations)("preserves the %s default for absent or empty startup configuration", async (operation) => {
+    for (const config of [undefined, { version: 1 }, { version: 1, configOptionValues: {} }]) {
+      const { p, target, start } = await setup(operation);
+      const result = await start(config);
+      expect(result.configOptions).toEqual([expect.objectContaining({ currentValue: "fixture/model" })]);
+      expect(p.received.some((command) => command.type === "set_model")).toBe(false);
+      await firstPrompt(p, target, "fixture/model");
+    }
+  });
+
+  it.each(operations)("rejects malformed %s startup configuration before native session mutation", async (operation) => {
+    for (const config of [
+      null, [], {}, { version: 2 }, { version: "1" },
+      { version: 1, modelId: "" }, { version: 1, modelId: " " }, { version: 1, modelId: false },
+      { version: 1, configOptionValues: [] }, { version: 1, configOptionValues: null },
+      { version: 1, configOptionValues: { model: "" } },
+      { version: 1, configOptionValues: { model: true } },
+      { version: 1, modelId: "other/family/x", configOptionValues: { model: false } },
+      { version: 1, configOptionValues: { thinking: "high" } },
+      { version: 1, modelId: "other/family/x", configOptionValues: { thinking: "high" } },
+    ]) {
+      const { p, start } = await setup(operation);
+      await expect(start(config)).rejects.toThrow();
+      expect(p.received).toEqual([]);
+    }
+  });
+
+  it.each(operations)("rejects unknown %s startup models without delivering a usable identity", async (operation) => {
+    const { p, target, start } = await setup(operation);
+    await expect(start({ version: 1, modelId: "missing/model" })).rejects.toThrow();
+    expect(p.received.some((command) => command.type === "set_model")).toBe(false);
+    await expect(p.connection.prompt({
+      sessionId: target, prompt: [{ type: "text", text: "must not run" }],
+    })).rejects.toThrow();
+    expect(p.received.some((command) => command.type === "prompt")).toBe(false);
+  });
+
+  it.each(operations)("does not fall back from an unknown explicit %s modelId to the model option", async (operation) => {
+    const { p, start } = await setup(operation);
+    await expect(start({
+      version: 1, modelId: "missing/model", configOptionValues: { model: "other/family/x" },
+    })).rejects.toThrow();
+    expect(p.received.some((command) => command.type === "set_model" || command.type === "prompt")).toBe(false);
+  });
+
+  it.each(operations)("withholds %s startup identity when native model application fails", async (operation) => {
+    for (const failure of ["reject", "response", "model", "identity", "catalog", "eof"] as const) {
+      const { p, target, start } = await setup(operation);
+      if (failure === "catalog") p.models.push({ provider: "other/family", id: "x", name: "Ambiguous" });
+      p.setModel((command) => {
+        if (failure === "reject") {
+          p.emit({ type: "response", id: command.id, command: command.type, success: false, error: "refused" });
+        } else if (failure === "eof") {
+          p.close();
+        } else {
+          const selected = p.models[1]!;
+          if (failure !== "model") p.state.model = selected;
+          if (failure === "identity") p.state.sessionFile = "/tmp/different-startup-session.jsonl";
+          p.reply(command, failure === "response" ? p.models[0] : selected);
+        }
+      });
+      await expect(start({ version: 1, modelId: "other/family/x" })).rejects.toThrow();
+      await expect(p.connection.prompt({
+        sessionId: target, prompt: [{ type: "text", text: "failed startup must not run" }],
+      })).rejects.toThrow();
+      expect(p.received.some((command) => command.type === "prompt")).toBe(false);
+    }
+  });
+
+  it.each(operations)("holds %s admission through startup model readback", async (operation) => {
+    const { p, target, start } = await setup(operation);
+    const started = deferred<void>();
+    let held: Record<string, unknown> | undefined;
+    let applied = false;
+    p.setModel((command) => {
+      applied = true;
+      p.state.model = p.models[1]!;
+      p.reply(command, p.state.model);
+    });
+    p.setState((command) => {
+      if (applied) {
+        held = command;
+        started.resolve();
+      } else p.reply(command, p.state);
+    });
+    let delivered = false;
+    const pending = start({ version: 1, modelId: "other/family/x" });
+    const outcome = pending.then(
+      (value) => { delivered = true; return { ok: true as const, value }; },
+      (error: unknown) => { delivered = true; return { ok: false as const, error }; },
+    );
+    try {
+      await Promise.race([
+        started.promise,
+        outcome.then(() => { throw new Error("Startup delivered before native model readback"); }),
+      ]);
+      expect(delivered).toBe(false);
+      await expect(p.connection.prompt({
+        sessionId: target, prompt: [{ type: "text", text: "not ready" }],
+      })).rejects.toThrow();
+      await expect(p.connection.newSession({ cwd: "/", mcpServers: [] })).rejects.toThrow();
+      expect(p.received.some((command) => command.type === "prompt")).toBe(false);
+      if (!held) throw new Error("Startup readback has no request");
+      p.reply(held, p.state);
+      held = undefined;
+      await pending;
+      await firstPrompt(p, target, "other/family/x");
+    } finally {
+      if (held) p.reply(held, p.state);
+      await outcome;
+    }
   });
 });

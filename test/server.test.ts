@@ -667,7 +667,9 @@ describe("015 model config ACP consumer", () => {
         protocolVersion: 1, clientCapabilities: {},
       });
       expect(initialized.agentCapabilities).toEqual({
-        promptCapabilities: { image: false, embeddedContext: false },
+        promptCapabilities: { image: true, embeddedContext: false },
+        sessionCapabilities: { resume: {}, fork: {} },
+        _meta: { lody: { usage: { version: 1 } } },
       });
       const session = await withTimeout(client.request<acp.NewSessionResponse>("session/new", {
         cwd: directory, mcpServers: [],
@@ -928,13 +930,21 @@ describe("OMP ACP server lifecycle", () => {
         protocolVersion: 1,
         clientCapabilities: {},
       });
-      // Exact match: an optional capability (load, resume, MCP, images, context) must not appear unreviewed.
+      // Exact match: usage, resume, fork and images are advertised; load (no history replay), MCP and
+      // embedded context must not appear unreviewed.
       expect(initialized).toEqual({
         protocolVersion: 1,
         agentInfo: { name: "omp-rpc", version: packageJson.version },
-        agentCapabilities: { promptCapabilities: { image: false, embeddedContext: false } },
+        agentCapabilities: {
+          promptCapabilities: { image: true, embeddedContext: false },
+          sessionCapabilities: { resume: {}, fork: {} },
+          _meta: { lody: { usage: { version: 1 } } },
+        },
         authMethods: [],
       });
+      const capabilities = (initialized as acp.InitializeResponse).agentCapabilities ?? {};
+      expect(capabilities).not.toHaveProperty("loadSession");
+      expect(capabilities).not.toHaveProperty("mcpCapabilities");
       const session = await withTimeout(
         client.request<{ sessionId: string }>("session/new", { cwd: directory, mcpServers: [] }),
         "session/new",
@@ -1836,7 +1846,9 @@ describe("015 explicit title ACP consumer", () => {
         protocolVersion: 1, clientCapabilities: {},
       });
       expect(initialized.agentCapabilities).toEqual({
-        promptCapabilities: { image: false, embeddedContext: false },
+        promptCapabilities: { image: true, embeddedContext: false },
+        sessionCapabilities: { resume: {}, fork: {} },
+        _meta: { lody: { usage: { version: 1 } } },
       });
       const session = await fixture.client.request<acp.NewSessionResponse>("session/new", {
         cwd: fixture.directory, mcpServers: [],

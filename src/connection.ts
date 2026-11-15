@@ -18,6 +18,14 @@ const ompModelSchema = z.object({
 });
 const ompModelsSchema = z.object({ models: z.array(ompModelSchema) });
 
+const startupModelIdSchema = z.string().refine((value) => value.trim().length > 0);
+const startupSessionConfigSchema = z.object({
+  version: z.literal(1),
+  modelId: startupModelIdSchema.optional(),
+  configOptionValues: z.object({ model: startupModelIdSchema.optional() })
+    .catchall(z.union([z.string(), z.boolean()])).optional(),
+});
+
 type OmpModel = z.infer<typeof ompModelSchema>;
 
 const ompStateSchema = z.object({
@@ -58,6 +66,7 @@ type ActivePrompt = {
   pendingLegacyCancel?: boolean;
   commandFailure?: Error;
   outcome?: "completed" | "aborted" | "error";
+  textMessageKey?: string;
 };
 
 type TitleControl = {
@@ -167,6 +176,14 @@ const textMessageUpdateFrameSchema = z.object({
   assistantMessageEvent: z.object({ type: z.literal("text_delta"), delta: z.string().min(1) }),
 });
 
+function assistantMessageKey(frame: Record<string, unknown>): string | undefined {
+  if (typeof frame.messageId === "string" && frame.messageId) return `message:${frame.messageId}`;
+  const message = frame.message;
+  const responseId =
+    message !== null && typeof message === "object" ? (message as Record<string, unknown>).responseId : undefined;
+  return typeof responseId === "string" && responseId ? `response:${responseId}` : undefined;
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: Error) => void;
@@ -189,6 +206,8 @@ function promptContent(blocks: acp.ContentBlock[]) {
   for (const block of blocks) {
     if (block.type === "text") text.push(block.text);
     else if (block.type === "image") (images ??= []).push({ type: "image", data: block.data, mimeType: block.mimeType });
+    // OMP's prompt has no link field; it gets the location as text and reads the file with its own tools.
+    else if (block.type === "resource_link") text.push(`${block.name}: ${block.uri}`);
     else throw new Error("OMP ACP adapter does not support this prompt content");
   }
   const message = text.join("\n\n");
@@ -220,23 +239,24 @@ export class OmpRpcConnection {
 
   async newSession(request: acp.NewSessionRequest): Promise<acp.NewSessionResponse> {
     if (this.active || this.sessionChanging || this.cancellationInFlight) throw new Error("OMP work is still active");
+    const startupModel = this.startupModel(request._meta);
     this.sessionChanging = true;
     try {
       this.invalidateSession();
       const result = await this.rpc.request("new_session");
       if (this.cancelled(result)) throw new Error("OMP cancelled session creation");
-      return await this.prepareSession(await this.readState());
+      return await this.prepareSession(await this.readState(), startupModel);
     } finally {
       this.sessionChanging = false;
     }
   }
 
   async resumeSession(request: acp.ResumeSessionRequest): Promise<acp.NewSessionResponse> {
-    return this.openExactSession(request.sessionId);
+    return this.openExactSession(request.sessionId, this.startupModel(request._meta));
   }
 
   async loadSession(request: acp.LoadSessionRequest): Promise<acp.LoadSessionResponse> {
-    const result = await this.openExactSession(request.sessionId);
+    const result = await this.openExactSession(request.sessionId, this.startupModel(request._meta));
     return { configOptions: result.configOptions };
   }
 
@@ -251,6 +271,7 @@ export class OmpRpcConnection {
     }
     if (!request.sessionId) throw new Error("OMP native session id is required");
     if (this.active || this.sessionChanging || this.cancellationInFlight) throw new Error("OMP work is still active");
+    const startupModel = this.startupModel(request._meta);
     this.sessionChanging = true;
     try {
       this.invalidateSession();
@@ -266,7 +287,7 @@ export class OmpRpcConnection {
       if (!state.sessionFile) throw new Error("OMP did not provide a persistent native session");
       if (state.sessionFile === request.sessionId) throw new Error("OMP fork did not select a different session");
       await this.requireSessionFile(state.sessionFile);
-      return await this.prepareSession(state);
+      return await this.prepareSession(state, startupModel);
     } finally {
       this.sessionChanging = false;
     }
@@ -294,20 +315,7 @@ export class OmpRpcConnection {
         (before.queuedMessageCount ?? 0) > 0 || before.isSettled === false
       ) throw new Error("OMP work is still active");
       mutationStarted = true;
-      const applied = ompModelSchema.parse(await this.rpc.request("set_model", {
-        provider: selected.provider, modelId: selected.id,
-      }));
-      if (applied.provider !== selected.provider || applied.id !== selected.id) {
-        throw new Error("OMP selected a different model");
-      }
-      const models = await this.readModels();
-      const state = await this.readState();
-      if (state.sessionFile !== request.sessionId) throw new Error("OMP selected a different session");
-      if (!state.model || state.model.provider !== selected.provider || state.model.id !== selected.id) {
-        throw new Error("OMP selected a different model");
-      }
-      const configuration = this.modelConfiguration(state, models);
-      if (this.failure) throw this.failure;
+      const { configuration } = await this.applyModel(request.sessionId, selected);
       this.modelChoices = configuration.modelChoices;
       this.enqueueNotification(() => {
         if (this.failure) return;
@@ -517,13 +525,13 @@ export class OmpRpcConnection {
     this.rpc.close();
   }
 
-  private async openExactSession(nativeSession: string): Promise<acp.NewSessionResponse> {
+  private async openExactSession(nativeSession: string, startupModel?: string): Promise<acp.NewSessionResponse> {
     if (!nativeSession) throw new Error("OMP native session id is required");
     if (this.active || this.sessionChanging || this.cancellationInFlight) throw new Error("OMP work is still active");
     this.sessionChanging = true;
     try {
       this.invalidateSession();
-      return await this.prepareSession(await this.switchSession(nativeSession));
+      return await this.prepareSession(await this.switchSession(nativeSession), startupModel);
     } finally {
       this.sessionChanging = false;
     }
@@ -543,19 +551,58 @@ export class OmpRpcConnection {
     return state;
   }
 
-  private async prepareSession(state: OmpState): Promise<acp.NewSessionResponse> {
+  private startupModel(metadata: acp.NewSessionRequest["_meta"]): string | undefined {
+    const lody = metadata?.lody;
+    if (!lody || typeof lody !== "object" || !("sessionConfig" in lody)) return undefined;
+    const parsed = startupSessionConfigSchema.safeParse(lody.sessionConfig);
+    if (!parsed.success) throw new Error("OMP startup session configuration is invalid");
+    const options = parsed.data.configOptionValues;
+    if (options && Object.keys(options).some((key) => key !== "model")) {
+      throw new Error("OMP startup configuration option is not supported");
+    }
+    return parsed.data.modelId ?? options?.model;
+  }
+
+  private async prepareSession(state: OmpState, startupModel?: string): Promise<acp.NewSessionResponse> {
     if (!state.sessionFile) throw new Error("OMP did not provide a persistent native session");
     const models = await this.readModels();
-    const current = await this.readState();
+    let current = await this.readState();
     if (current.sessionFile !== state.sessionFile) throw new Error("OMP selected a different session");
-    const configuration = this.modelConfiguration(current, models);
+    let configuration;
+    if (startupModel !== undefined) {
+      const selected = this.modelCatalog(models).get(startupModel);
+      if (!selected) throw new Error("OMP startup model is not available");
+      if (
+        current.isStreaming || current.isCompacting || current.hasPendingAsyncWork ||
+        (current.queuedMessageCount ?? 0) > 0 || current.isSettled === false
+      ) throw new Error("OMP work is still active");
+      ({ state: current, configuration } = await this.applyModel(state.sessionFile, selected));
+    } else configuration = this.modelConfiguration(current, models);
     if (this.failure) throw this.failure;
-    this.sessionId = current.sessionFile;
+    this.sessionId = state.sessionFile;
     this.nativeSessionId = current.sessionId ?? "";
     this.sessionGeneration += 1;
     this.usage = new SessionUsageAccumulator();
     this.modelChoices = configuration.modelChoices;
     return { sessionId: this.sessionId, configOptions: configuration.configOptions };
+  }
+
+  private async applyModel(sessionFile: string, selected: OmpModel) {
+    const applied = ompModelSchema.parse(await this.rpc.request("set_model", {
+      provider: selected.provider, modelId: selected.id,
+    }));
+    if (applied.provider !== selected.provider || applied.id !== selected.id) {
+      throw new Error("OMP selected a different model");
+    }
+    const models = await this.readModels();
+    const state = await this.readState();
+    if (state.sessionFile !== sessionFile) throw new Error("OMP selected a different session");
+    if (!state.model || state.model.provider !== selected.provider || state.model.id !== selected.id) {
+      throw new Error("OMP selected a different model");
+    }
+    const configuration = this.modelConfiguration(state, models);
+    if (this.failure) throw this.failure;
+    return { state, configuration };
   }
 
   private async readModels(): Promise<OmpModel[]> {
@@ -564,7 +611,7 @@ export class OmpRpcConnection {
     return result.data.models;
   }
 
-  private modelConfiguration(state: OmpState, models: OmpModel[]) {
+  private modelCatalog(models: OmpModel[]): Map<string, OmpModel> {
     const modelChoices = new Map<string, OmpModel>();
     for (const model of models) {
       const value = `${model.provider}/${model.id}`;
@@ -574,6 +621,11 @@ export class OmpRpcConnection {
       }
       if (!previous) modelChoices.set(value, model);
     }
+    return modelChoices;
+  }
+
+  private modelConfiguration(state: OmpState, models: OmpModel[]) {
+    const modelChoices = this.modelCatalog(models);
     if (!state.model) {
       modelChoices.clear();
       return { configOptions: [], modelChoices };
@@ -752,12 +804,21 @@ export class OmpRpcConnection {
     const parsed = textMessageUpdateFrameSchema.safeParse(frame);
     if (!parsed.success) return;
     const sessionId = this.sessionId;
+    const active = this.active;
+    // OMP narrates between tool calls as separate assistant messages, but ACP text
+    // chunks carry no message boundary; without a break the host renders one run-on paragraph.
+    const messageKey = assistantMessageKey(frame);
+    const separator =
+      messageKey !== undefined && active.textMessageKey !== undefined && messageKey !== active.textMessageKey
+        ? "\n\n"
+        : "";
+    if (messageKey !== undefined) active.textMessageKey = messageKey;
     this.enqueueNotification(() =>
       this.host.update({
         sessionId,
         update: {
           sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: parsed.data.assistantMessageEvent.delta },
+          content: { type: "text", text: separator + parsed.data.assistantMessageEvent.delta },
         },
       })
     );
