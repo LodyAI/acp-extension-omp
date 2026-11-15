@@ -301,6 +301,40 @@ describe("OMP RPC connection", () => {
     });
   });
 
+  it("translates resource links to name: uri text in block order next to inline images", async () => {
+    const p = peer();
+    peers.push(p);
+    const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    await expect(p.connection.prompt({
+      sessionId: session.sessionId,
+      prompt: [
+        { type: "text", text: "look at this" },
+        { type: "image", data: "AAEC", mimeType: "image/png" },
+        { type: "resource_link", uri: "file:///work/.lody/attachments/shot%201.png", name: "shot 1.png", mimeType: "image/png", size: 3 },
+        { type: "resource_link", uri: "https://invalid.example/context", name: "synthetic\ncontext" },
+        { type: "text", text: "thanks" },
+      ],
+    })).resolves.toEqual({ stopReason: "end_turn" });
+    expect(p.received.filter((value) => value.type === "prompt")).toEqual([{
+      id: expect.any(String), type: "prompt",
+      message: "look at this\n\nshot 1.png: file:///work/.lody/attachments/shot%201.png\n\nsynthetic\ncontext: https://invalid.example/context\n\nthanks",
+      images: [{ type: "image", data: "AAEC", mimeType: "image/png" }],
+    }]);
+  });
+
+  it("submits a resource-link-only prompt as text without an images field", async () => {
+    const p = peer();
+    peers.push(p);
+    const session = await p.connection.newSession({ cwd: "/work", mcpServers: [] });
+    await expect(p.connection.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "resource_link", uri: "file:///work/notes.txt", name: "notes.txt" }],
+    })).resolves.toEqual({ stopReason: "end_turn" });
+    expect(p.received.find((value) => value.type === "prompt")).toEqual({
+      id: expect.any(String), type: "prompt", message: "notes.txt: file:///work/notes.txt",
+    });
+  });
+
   it("keeps the existing text-only payload and blank-block joining without an images field", async () => {
     const p = peer();
     peers.push(p);
@@ -317,7 +351,6 @@ describe("OMP RPC connection", () => {
   it.each([
     { type: "audio", data: "c291bmQ=", mimeType: "audio/wav" },
     { type: "resource", resource: { uri: "file:///synthetic-context", text: "embedded context" } },
-    { type: "resource_link", uri: "https://invalid.example/context", name: "synthetic context" },
   ] satisfies acp.ContentBlock[])("rejects a mixed $type request atomically and remains usable", async (unsupported) => {
     const p = peer();
     peers.push(p);

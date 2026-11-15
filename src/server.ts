@@ -275,8 +275,9 @@ export function serve(stream: Stream, options: ServeOptions) {
         protocolVersion: 1,
         agentInfo: { name: "omp-rpc", version: packageJson.version },
         agentCapabilities: {
-          promptCapabilities: { image: false, embeddedContext: false },
-          // Other optional capabilities stay unadvertised until the baseline matrix and review pass.
+          promptCapabilities: { image: true, embeddedContext: false },
+          // loadSession stays unadvertised: session/load must replay history and this adapter only switches files.
+          sessionCapabilities: { resume: {}, fork: {} },
           _meta: { lody: { usage: { version: 1 } } satisfies LodyExtensionCapabilities },
         },
         authMethods: [],

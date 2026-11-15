@@ -206,6 +206,8 @@ function promptContent(blocks: acp.ContentBlock[]) {
   for (const block of blocks) {
     if (block.type === "text") text.push(block.text);
     else if (block.type === "image") (images ??= []).push({ type: "image", data: block.data, mimeType: block.mimeType });
+    // OMP's prompt has no link field; it gets the location as text and reads the file with its own tools.
+    else if (block.type === "resource_link") text.push(`${block.name}: ${block.uri}`);
     else throw new Error("OMP ACP adapter does not support this prompt content");
   }
   const message = text.join("\n\n");
