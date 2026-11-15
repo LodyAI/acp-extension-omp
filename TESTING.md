@@ -339,6 +339,9 @@ Node 26.13.0 单一工具链；仍不是 tag 上的完整平台矩阵行。
 18.18.x 与 18.12.x 记录保留原提交、工具链和限制，只作历史证据。
 这些历史记录及直接 load/resume 成功均不关闭当前 baseline、平台或能力宣告门禁。
 用例 5/7/9 的合成部分继续与真实 OMP 证据分开。
+2026-11-16 用户裁决：目前只有 Mac 可以做测试，Release 1 的批准矩阵只含 macOS arm64 上的
+Latest stable 和 Previous stable 两行。本节提到的其他 OS 目标对 Release 1 不构成门禁，
+仍照实列为未验证，不声称支持。Linux 和 Windows 上只有 CI 的合成测试，没有真实 OMP 证据。
 Agents still must not download OMP without such authorization. The 2026-10-09
 names 18.8.6 and 18.8.5 are not the current target. 18.8.4 above is neither
 row, including when it is the `omp` found on `PATH`. Required next

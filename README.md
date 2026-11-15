@@ -14,7 +14,7 @@ does not bundle OMP, inspect credentials, or persist user session data.
 仅在 POSIX 上运行，在 Windows 上跳过。不修改任何生产环境的
 运行时清单。
 
-发布前，必须通过稳定版本和操作系统矩阵（包括 18.2.8 在 macOS 以外的系统）、
+发布前，必须通过稳定版本矩阵（Release 1 的平台范围只有 macOS arm64，其他系统未验证、不声称支持）、
 独立维护者审核、可复现的运行时归档、公开校验和回读以及 Lody
 端到端验收。这些门禁记录在 `TESTING.md` 和
 `RELEASE.md` 中；已宣告 Lody usage、resume、fork 和图片能力，load 能力宣告仍保持禁用。
