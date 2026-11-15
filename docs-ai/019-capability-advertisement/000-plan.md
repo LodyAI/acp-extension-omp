@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **状态** | 已核对 |
+| **状态** | 已实现 |
 | **锚点日期** | 2026-11-15 |
 | **规格核对** | 2026-11-15，非起草者独立 reviewer 两轮完整核对。第一轮不允许实现（PR19-001 至 PR19-008），修订后第二轮明确「允许实现019」，附条件 PR19-009 至 PR19-015。这些条件已写进本文，补充文字本身未再审，由实现后的源码／证据审查一并核对。许可只含 `promptContent` 的 `resource_link` 分支、`initialize` 的三项宣告、对应测试、`expectedInitialize` 和探针脚本；不含 load 宣告、合并、tag、发布。 |
 | **相关** | [V1 剩余门禁](../012-remaining-v1-gates/000-plan.md)、[范围收口](../012-remaining-v1-gates/017-release1-scope-and-target.md)、[R-UX 合同](../012-remaining-v1-gates/007-r-ux-contract.md)、[兼容政策](../../COMPATIBILITY.md)、[验证合同](../../TESTING.md)、[发布门禁](../../RELEASE.md) |
@@ -80,3 +80,5 @@ fork 没有带历史切点的风险：Lody 在没有 Core `forkAtTurn` 能力时
 - 至少两轮非实现者审查，结论分开记录已解决、未解决、修了未再审。
 
 ## 修订记录
+
+- 更新于 2026-11-16：实现落地，探针对图片的判定由「该图片字节」改为按文件签名核对图片部件 — 见 [001-action.md](001-action.md)

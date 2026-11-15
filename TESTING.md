@@ -290,14 +290,53 @@ Local evidence, not a release declaration.
 - 这是单一工具链、单一平台的本地证据。归档是临时验证产物，未打 tag、未发布、未 pin；
   真实与合成的划分、未验证项与上面的 18.20.2 记录相同。
 
+### 矩阵记录：`d6362de` 上的 OMP 18.20.2 与 18.20.1，含能力探针 (2026-11-16)
+
+仅限 macOS arm64 单一工具链的本地证据，不是 tag、发布声明或完整平台矩阵。
+
+| 字段 | 值 |
+| --- | --- |
+| 适配器提交 | `d6362de`，`git archive` 干净导出 |
+| OMP 18.20.2 | Homebrew `/opt/homebrew/Cellar/omp/18.20.2/bin/omp`，224277648 字节，SHA-256 `e2de0974ce581bfcf2044ea795c712fa240fdf8304f7bdb4b3d81b154d2b57fc`，与官方 `v18.20.2` 的 `omp-darwin-arm64` 一致 |
+| OMP 18.20.1 | 官方 `v18.20.1` 的 `omp-darwin-arm64`，经用户授权下载到隔离临时目录；224046224 字节，SHA-256 `2a080bfd790309001ea001140382a5850be284e984c2f8678a81a41a37e77490`，与发布页摘要一致；未安装到 `PATH`，不在仓库或制品里 |
+| Node / npm | 26.13.0 / 11.20.0 |
+| OS | macOS 27.0.1，Darwin arm64 |
+| Core | 固定 npm `acp-extension-core` 0.1.8 |
+| 被测入口 | 干净导出打出的 `acp-extension-omp-0.1.0.tgz`（38508 字节，SHA-256 `fc58ee3058e92faf054806735bc9effbe15433899401acca3039a3a3317fa3ca`）独立安装后的 `node_modules/acp-extension-omp/dist/index.js`；不是已发布制品 |
+| 探针 | `scripts/capability-probe.mjs`，SHA-256 `acd3ccf21fb5abc55018b1c22d8dbb7b4e8bce338c71dca49b680cb9b980bc9d` |
+| 测试配置 | 各 runner 自建临时 HOME/profile，只用无凭据的本地回环模型 |
+| 结果 | `npm ci` 后 `npm run check` 416 项通过；build、`node scripts/verify-package.mjs` 通过；两个 OMP 版本上 smoke、contract、探针均退出 0 |
+
+- 每个版本的实际命令是 `node scripts/smoke.mjs <入口> <omp>`、`node scripts/contract.mjs <入口> <omp>`
+  和 `node scripts/capability-probe.mjs <入口> <omp>`，各跑一次，首次通过，结束后没有残留
+  `omp --mode rpc` 进程或探针临时目录。18.20.1 的首次下载在 136 MB 处中断，那份不完整的文件
+  没有用于任何测试；续传完成并核对摘要后才运行。
+- contract 的 `expectedInitialize` 现在是 usage、`sessionCapabilities.resume`、
+  `sessionCapabilities.fork` 和 `promptCapabilities.image: true`；`loadSession` 不在其中。
+  真实主路径和合成部分的划分与上面的 18.20.2 记录相同。
+- 探针在两个版本上的观察值相同：
+  - fork：源连接保持存活时另一连接 fork 同一文件，得到不同的 `sessionFile`；源文件 SHA-256 在
+    fork 前后和 fork 会话完成一轮之后都不变；源会话之后还能完成一轮且不改动 fork 出的文件。
+  - 图片与 `resource_link`：发 `[text, image, resource_link]`，回环端点只收到 1 个模型请求，其中
+    最后一条用户消息带恰好 1 个图片部件和 `<name>: <uri>` 文字，同一请求带源会话第一轮的用户文字和
+    助手回复。OMP 把提交的 PNG 转码为 `image/webp`，原始字节不保留；探针按文件签名判定图片部件，
+    不比对原始字节。
+  - resume：新连接 `session/resume` 后的模型请求带源会话历史，这一轮写进了同一个文件。
+- 证据边界：探针用合成 1×1 图片和声明支持图片的回环模型，不证明真实 provider 的视觉能力。
+  未验证：模型声明不支持图片时 OMP 的行为；大图经 RPC 单行 JSON 的上限；含空格或非 ASCII 路径的
+  `file://` URI；探针和 contract 运行期间 OMP 是否有外网访问（没有抓包）；其他平台/架构和 Node
+  工具链；原生后台任务、自动 compaction、真实进行中进程失败；真实 Lody 界面上的恢复、fork、
+  发图片和发附件。本记录不替代能力宣告的发布审核或公开制品回读。
+
 ## Remaining gates
 
 The OMP 18.2.8 baseline real contract passed on macOS arm64 / Node 22.22.3
 with the official `omp-darwin-arm64` asset (size and SHA-256 in
 `COMPATIBILITY.md`); other OS targets for 18.2.8 remain unverified.
-截至 2026-11-15，当前适配目标为 OMP 18.20.2，上一稳定版回归目标为 18.20.1。
-上面的 18.20.2 记录来自 macOS arm64 / Node 26.13.0，先在本地候选工作树、后在干净提交 `e347124` 的导出上通过；仍不是 tag 上的完整平台矩阵行。
-18.20.1 尚未安装、未测试。18.18.x 与 18.12.x 记录保留原提交、工具链和限制，只作历史证据。
+截至 2026-11-16，当前适配目标为 OMP 18.20.2，上一稳定版回归目标为 18.20.1。
+两者都在干净提交 `d6362de` 的导出上通过了 smoke、contract 和能力探针，范围是 macOS arm64 /
+Node 26.13.0 单一工具链；仍不是 tag 上的完整平台矩阵行。
+18.18.x 与 18.12.x 记录保留原提交、工具链和限制，只作历史证据。
 这些历史记录及直接 load/resume 成功均不关闭当前 baseline、平台或能力宣告门禁。
 用例 5/7/9 的合成部分继续与真实 OMP 证据分开。
 Agents still must not download OMP without such authorization. The 2026-10-09
