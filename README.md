@@ -78,9 +78,12 @@ new／load／resume／fork 等待真实目录及最终同文件 state 后才交�
 显式标题 T1 入口仅为单个 text block 起首精确 `/rename` 后接空白与非空标题，内部调用现有
 `set_session_name`，不再发 native prompt、不调用原生 card 生成或 input hook。
 只有单次 stats 核实原文件、最终 `get_state` 真实读回同一精确 file／清洗后 sessionName，
-才推标准 `session_info_update` 的 `titleSource:'explicit'`，稳定排空后完成控制 prompt；
-同名也推 explicit，不合成 assistant。最终身份失败失效旧 A，明确同 A 仅名称错误则保留身份。
-局部取消不发 native abort；成功通知提交后的 late cancel 只等原排空。
+才推标准 `session_info_update` 的 `titleSource:'explicit'`，随后发一条固定的确认
+`agent_message_chunk`：`Session renamed to "<读回的 sessionName>".`，两条都稳定排空后完成控制 prompt；
+同名也推 explicit 并确认。确认文字由适配器写出，不是模型输出，不计用量，也不写进 OMP 会话文件；
+核实失败或提交前取消时不发。标题通知已送达而确认文字发送失败时，prompt 失败，不回滚已改的名称。
+最终身份失败失效旧 A，明确同 A 仅名称错误则保留身份。
+局部取消不发 native abort；成功通知提交后的 late cancel 只等这两条通知排空。
 无参、混合内容或非 literal 形式仍走原普通路径，未知 native 标题帧不偷标 explicit。
 这不提供双向 UI setter，也不宣告 Core `sessionTitle` 自动生成 ownership。
 
@@ -104,7 +107,7 @@ The adapter launches only `omp --mode rpc`. OMP diagnostics go to stderr; ACP
 and OMP RPC traffic remain separate. Transport failure and child-process exit
 fail the ACP connection rather than synthesizing a successful prompt result.
 
-ACP 文本、用量、模型配置或显式标题通知发送失败时，适配器立即关闭 RPC／ACP 连接并回收 OMP，
+ACP 文本、用量、模型配置、显式标题或改名确认通知发送失败时，适配器立即关闭 RPC／ACP 连接并回收 OMP，
 不等待 prompt ACK 或 native terminal；缓慢但成功的通知仍按顺序排空。
 
 父输入正常 EOF、显式关闭与信号关闭保持原正常／按信号退出规则。未观察到正常关闭

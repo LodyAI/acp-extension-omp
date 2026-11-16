@@ -1836,9 +1836,16 @@ describe("015 explicit title ACP consumer", () => {
   it("publishes only a verified explicit title from a literal rename prompt", async () => {
     const updates: acp.SessionNotification[] = [];
     const usage: unknown[] = [];
+    const order: string[] = [];
     const fixture = await closeCauseFixture("title-control", (message) => {
-      if (message.method === "session/update") updates.push(message.params as acp.SessionNotification);
+      if (message.method === "session/update") {
+        const notification = message.params as acp.SessionNotification;
+        updates.push(notification);
+        order.push(notification.update.sessionUpdate);
+      }
       if (message.method === "_lody/session/usage_update") usage.push(message.params);
+      const result = message.result as { stopReason?: unknown } | undefined;
+      if (result?.stopReason !== undefined) order.push(`stop:${String(result.stopReason)}`);
     });
     let cleanup: PromiseSettledResult<void>[] = [];
     try {
@@ -1864,7 +1871,15 @@ describe("015 explicit title ACP consumer", () => {
           _meta: { lody: { titleSource: "explicit" } },
         },
       }]);
-      expect(updates.filter((notification) => notification.update.sessionUpdate === "agent_message_chunk")).toEqual([]);
+      // The verified rename is confirmed in the title's own session, after the title and before the prompt response.
+      expect(updates.filter((notification) => notification.update.sessionUpdate === "agent_message_chunk")).toEqual([{
+        sessionId: session.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: 'Session renamed to "用户 标题 / A".' },
+        },
+      }]);
+      expect(order).toEqual(["session_info_update", "agent_message_chunk", "stop:end_turn"]);
       expect(usage).toEqual([]);
       const commands = (await readFile(join(fixture.directory, "rpc-commands.jsonl"), "utf8"))
         .trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
@@ -1910,6 +1925,12 @@ describe("015 explicit title ACP consumer", () => {
         update: {
           sessionUpdate: "session_info_update", title: expected,
           _meta: { lody: { titleSource: "explicit" } },
+        },
+      }, {
+        sessionId: session.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: `Session renamed to "${expected}".` },
         },
       }]);
       const commands = (await readFile(join(fixture.directory, "rpc-commands.jsonl"), "utf8"))
@@ -1977,6 +1998,53 @@ describe("015 explicit title ACP consumer", () => {
       ]), "015 title output rejection", RPC_TIMEOUT_MS);
       await withTimeout(fixture.client.closed, "015 title failed SDK close", RPC_TIMEOUT_MS);
       await withTimeout(fixture.exited, "015 title owned group cleanup", FORCED_CLOSE_TIMEOUT_MS);
+      expect(successfulResponses).toHaveLength(successfulBefore);
+      expect(fixture.failures).toHaveLength(1);
+      expect(process.exitCode).toBe(1);
+      expect(fixture.child?.pid).toBeDefined();
+      expect(processExists(fixture.child!.pid!)).toBe(false);
+      if (process.platform !== "win32") expect(processExists(-fixture.child!.pid!)).toBe(false);
+    } finally {
+      cleanup = await fixture.cleanup();
+    }
+    expect(cleanup[0]?.status).toBe("fulfilled");
+  });
+
+  it("fails and reaps the actual connection when the rename confirmation output write rejects", async () => {
+    const rejected = Promise.withResolvers<void>();
+    const successfulResponses: unknown[] = [];
+    const delivered: string[] = [];
+    const fixture = await closeCauseFixture("title-control", (message) => {
+      const notification = message.params as acp.SessionNotification | undefined;
+      if (message.method === "session/update" && notification) {
+        if (notification.update.sessionUpdate === "agent_message_chunk") {
+          rejected.resolve();
+          throw new Error("synthetic rename confirmation output failure");
+        }
+        delivered.push(notification.update.sessionUpdate);
+      }
+      if (message.id !== undefined && message.result !== undefined) successfulResponses.push(message.result);
+    });
+    let cleanup: PromiseSettledResult<void>[] = [];
+    try {
+      const session = await fixture.client.request<acp.NewSessionResponse>("session/new", {
+        cwd: fixture.directory, mcpServers: [],
+      });
+      const successfulBefore = successfulResponses.length;
+      const pending = fixture.client.request("session/prompt", {
+        sessionId: session.sessionId, prompt: [{ type: "text", text: "/rename Title lands but no success" }],
+      });
+      const outcome = pending.then((value) => ({ value }), (error: unknown) => ({ error }));
+      await withTimeout(Promise.race([
+        rejected.promise,
+        outcome.then(() => { throw new Error("Rename confirmation did not reach its real failing output sink"); }),
+      ]), "020 rename confirmation output rejection", RPC_TIMEOUT_MS);
+      await withTimeout(fixture.client.closed, "020 rename confirmation failed SDK close", RPC_TIMEOUT_MS);
+      await withTimeout(fixture.exited, "020 rename confirmation owned group cleanup", FORCED_CLOSE_TIMEOUT_MS);
+      // The title was already delivered; the prompt still must not report success.
+      expect(delivered).toEqual(["session_info_update"]);
+      // The rejected write also breaks the SDK output stream, so no response could be written either way.
+      // This case proves close and reaping; the connection-level "send rejects" case proves the prompt itself fails.
       expect(successfulResponses).toHaveLength(successfulBefore);
       expect(fixture.failures).toHaveLength(1);
       expect(process.exitCode).toBe(1);
