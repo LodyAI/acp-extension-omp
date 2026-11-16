@@ -492,14 +492,24 @@ export class OmpRpcConnection {
         return;
       }
       control.committed = true;
-      this.enqueueNotification(() => {
+      const confirmedTitle = actual.data.sessionName;
+      this.enqueueNotification(async () => {
         if (this.failure || this.titleControl !== control) return;
-        return this.host.update({
+        await this.host.update({
           sessionId: control.sessionFile,
           update: {
             sessionUpdate: "session_info_update",
-            title: actual.data.sessionName,
+            title: confirmedTitle,
             _meta: { lody: { titleSource: "explicit" } },
+          },
+        });
+        if (this.failure || this.titleControl !== control) return;
+        // A title-only turn has nothing a host can show as output; OMP's own UI confirms a rename with this sentence.
+        await this.host.update({
+          sessionId: control.sessionFile,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: `Session renamed to "${confirmedTitle}".` },
           },
         });
       });

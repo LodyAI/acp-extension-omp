@@ -3086,6 +3086,21 @@ describe("015 explicit title connection consumer", () => {
     return { p, directory, source, target, session };
   }
 
+  const explicitTitle = (sessionId: string, title: string): acp.SessionNotification => ({
+    sessionId,
+    update: { sessionUpdate: "session_info_update", title, _meta: { lody: { titleSource: "explicit" } } },
+  });
+  const renameConfirmation = (sessionId: string, title: string): acp.SessionNotification => ({
+    sessionId,
+    update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `Session renamed to "${title}".` } },
+  });
+  // Gates match the confirmation text, so an ordinary reply chunk can never be held in its place.
+  const isRenameConfirmation = (notification: acp.SessionNotification, title: string) => {
+    const update = notification.update;
+    return update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" &&
+      update.content.text === `Session renamed to "${title}".`;
+  };
+
   function ordinaryPrompt(
     p: Peer,
     sessionId: string,
@@ -3199,7 +3214,7 @@ describe("015 explicit title connection consumer", () => {
     expect(p.failures).toEqual([]);
   });
 
-  it.each(["set_session_name", "get_session_stats", "get_state", "notification"] as const)(
+  it.each(["set_session_name", "get_session_stats", "get_state", "notification", "confirmation"] as const)(
     "isolates every unrelated native output and completion while title %s is held",
     async (phase) => {
       const { p, directory, source } = await setup();
@@ -3235,7 +3250,10 @@ describe("015 explicit title connection consumer", () => {
         } else p.reply(command, p.state);
       });
       p.setUpdate(async (notification) => {
-        if (phase === "notification" && notification.update.sessionUpdate === "session_info_update" && !gated) {
+        const holds = phase === "notification"
+          ? notification.update.sessionUpdate === "session_info_update"
+          : phase === "confirmation" && isRenameConfirmation(notification, "Verified explicit name");
+        if (holds && !gated) {
           gated = true;
           release = () => { notificationGate.resolve(); };
           started.resolve();
@@ -3244,6 +3262,7 @@ describe("015 explicit title connection consumer", () => {
         p.updates.push(notification);
       });
       const before = p.received.length;
+      const updatesBefore = p.updates.length;
       let finished = false;
       const pending = p.connection.prompt({
         sessionId: source, prompt: [{ type: "text", text: "/rename Verified explicit name" }],
@@ -3281,13 +3300,14 @@ describe("015 explicit title connection consumer", () => {
         if (!resume) throw new Error("Owned title producer is missing");
         resume();
         await expect(pending).resolves.toEqual({ stopReason: "end_turn" });
-        expect(p.updates.filter((notification) => notification.update.sessionUpdate === "session_info_update")).toEqual([{
-          sessionId: source,
-          update: {
-            sessionUpdate: "session_info_update", title: "Verified explicit name",
-            _meta: { lody: { titleSource: "explicit" } },
-          },
-        }]);
+        expect(p.updates.filter((notification) => notification.update.sessionUpdate === "session_info_update")).toEqual([
+          explicitTitle(source, "Verified explicit name"),
+        ]);
+        // The whole control produced exactly the title and then its confirmation; nothing unowned was forwarded.
+        expect(p.updates.slice(updatesBefore)).toEqual([
+          explicitTitle(source, "Verified explicit name"),
+          renameConfirmation(source, "Verified explicit name"),
+        ]);
         expect(p.received.slice(before).filter((command) => command.type === "prompt" || command.type === "abort")).toEqual([]);
         expect(p.received.slice(before).filter((command) => command.type === "get_session_stats")).toHaveLength(1);
         const replay = unowned.filter((frame) => frame.type === "message_start" || frame.type === "message_update" || frame.type === "message_end");
@@ -3299,7 +3319,7 @@ describe("015 explicit title connection consumer", () => {
         expect(p.updates.flatMap((notification) => {
           const update = notification.update;
           return update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" ? [update.content.text] : [];
-        })).toEqual(["ordinary real prompt", "ordinary real prompt"]);
+        })).toEqual(["ordinary real prompt", 'Session renamed to "Verified explicit name".', "ordinary real prompt"]);
       } finally {
         release?.();
         notificationGate.resolve();
@@ -3428,10 +3448,12 @@ describe("015 explicit title connection consumer", () => {
     },
   );
 
-  it.each(["set_session_name", "get_session_stats", "get_state", "notification"] as const)(
+  it.each(["set_session_name", "get_session_stats", "get_state", "notification", "confirmation"] as const)(
     "keeps local cancel within its own %s wait and never sends native abort",
     async (phase) => {
       const { p, source } = await setup();
+      // Once the title is committed, a cancel only waits for the title and its confirmation to drain.
+      const committed = phase === "notification" || phase === "confirmation";
       const started = deferred<void>();
       const notificationGate = deferred<void>();
       let release: (() => void) | undefined;
@@ -3456,7 +3478,10 @@ describe("015 explicit title connection consumer", () => {
         } else p.reply(command, p.state);
       });
       p.setUpdate(async (notification) => {
-        if (phase === "notification" && notification.update.sessionUpdate === "session_info_update" && !gated) {
+        const holds = phase === "notification"
+          ? notification.update.sessionUpdate === "session_info_update"
+          : phase === "confirmation" && isRenameConfirmation(notification, "Local cancel boundary");
+        if (holds && !gated) {
           gated = true; release = () => { notificationGate.resolve(); }; started.resolve();
           await notificationGate.promise;
         }
@@ -3489,14 +3514,16 @@ describe("015 explicit title connection consumer", () => {
         release = undefined;
         if (!resume) throw new Error("Cancelled title producer is missing");
         resume();
-        await expect(pending).resolves.toEqual({ stopReason: phase === "notification" ? "end_turn" : "cancelled" });
+        await expect(pending).resolves.toEqual({ stopReason: committed ? "end_turn" : "cancelled" });
         await cancellation;
         expect(p.received.slice(before).filter((command) => command.type === "get_session_stats")).toHaveLength(1);
         expect(p.received.slice(before).filter((command) => command.type === "get_state")).toHaveLength(
-          phase === "get_state" || phase === "notification" ? 1 : 0,
+          phase === "get_state" || committed ? 1 : 0,
         );
-        const titles = p.updates.filter((notification) => notification.update.sessionUpdate === "session_info_update");
-        expect(titles).toHaveLength(phase === "notification" ? 1 : 0);
+        expect(p.updates).toEqual(committed ? [
+          explicitTitle(source, "Local cancel boundary"),
+          renameConfirmation(source, "Local cancel boundary"),
+        ] : []);
         expect(p.usages).toEqual([]);
         await expect(ordinaryPrompt(p, source)).resolves.toEqual({ stopReason: "end_turn" });
       } finally {
@@ -3508,7 +3535,7 @@ describe("015 explicit title connection consumer", () => {
     },
   );
 
-  it.each(["set_session_name", "get_session_stats", "get_state", "notification"] as const)(
+  it.each(["set_session_name", "get_session_stats", "get_state", "notification", "confirmation"] as const)(
     "fails globally on EOF while title %s is held without waiting for an unrelated outcome",
     async (phase) => {
       const { p, source } = await setup();
@@ -3534,7 +3561,10 @@ describe("015 explicit title connection consumer", () => {
         } else p.reply(command, p.state);
       });
       p.setUpdate(async (notification) => {
-        if (phase === "notification" && notification.update.sessionUpdate === "session_info_update" && !gated) {
+        const holds = phase === "notification"
+          ? notification.update.sessionUpdate === "session_info_update"
+          : phase === "confirmation" && isRenameConfirmation(notification, "EOF cannot acknowledge me");
+        if (holds && !gated) {
           gated = true; started.resolve();
           await notificationGate.promise;
         }
@@ -3565,6 +3595,54 @@ describe("015 explicit title connection consumer", () => {
         }
         await outcome;
       }
+    },
+  );
+
+  it("does not confirm a rename when the connection fails right after the title is delivered", async () => {
+    const { p, source } = await setup();
+    const titleHandled = deferred<void>();
+    p.setUpdate(async (notification) => {
+      p.updates.push(notification);
+      if (notification.update.sessionUpdate !== "session_info_update") return;
+      // Close inside the title handler and let the EOF land before it returns, so the failure precedes the confirmation send.
+      p.close();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      titleHandled.resolve();
+    });
+    await expect(p.connection.prompt({
+      sessionId: source, prompt: [{ type: "text", text: "/rename Delivered then lost" }],
+    })).rejects.toThrow();
+    // The prompt already failed on EOF; wait until the title send has returned and any wrongly sent confirmation would have arrived.
+    await titleHandled.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(p.updates).toEqual([explicitTitle(source, "Delivered then lost")]);
+    expect(p.failures).toHaveLength(1);
+    expect(p.usages).toEqual([]);
+  });
+
+  it.each(["session_info_update", "agent_message_chunk"] as const)(
+    "fails the rename without a success response when the %s send rejects",
+    async (failing) => {
+      const { p, source } = await setup();
+      const attempted: string[] = [];
+      p.setUpdate(async (notification) => {
+        attempted.push(notification.update.sessionUpdate);
+        if (notification.update.sessionUpdate === failing) throw new Error("synthetic rename output failure");
+        p.updates.push(notification);
+      });
+      await expect(p.connection.prompt({
+        sessionId: source, prompt: [{ type: "text", text: "/rename Output cannot be delivered" }],
+      })).rejects.toThrow();
+      // A rejected title send never reaches the confirmation; a rejected confirmation leaves the title delivered.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(attempted).toEqual(
+        failing === "session_info_update" ? ["session_info_update"] : ["session_info_update", "agent_message_chunk"],
+      );
+      expect(p.updates).toEqual(
+        failing === "session_info_update" ? [] : [explicitTitle(source, "Output cannot be delivered")],
+      );
+      expect(p.failures).toHaveLength(1);
+      expect(p.usages).toEqual([]);
     },
   );
 

@@ -189,3 +189,4 @@
 - [017 — 按原生子 agent ID 统计子 agent 状态](017-subagent-status-by-id/000-plan.md) — 2026-10-25：核实 Lody 面板对同一 taskId 的 follow-up 终态单调、旧 turn 归属与取消绑定，结论不可行，建议按 012.009 移出 Release 1；保留获准后的映射、取消与宣告合同
 - [018 — 启动模型配置与最新版 OMP 验证](018-startup-session-config/000-plan.md) — 2026-11-08：建立 ACP 会话交付前应用显式模型，保留身份核实和能力宣告门禁
 - [019 — Release 1 能力宣告与 resource_link 翻译](019-capability-advertisement/000-plan.md) — 2026-11-15：宣告 resume、fork 和图片，把 resource_link 翻译成文字；load 因不重放历史继续不宣告
+- [020 — 显式 /rename 成功后的确认文字](020-rename-confirmation/000-plan.md) — 2026-11-16：改名核实成功并发出标题通知后，再发一条固定的确认 agent_message_chunk，宿主不再把这一轮当成无输出
